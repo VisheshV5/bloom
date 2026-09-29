@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bloom"
+version = "0.1.0"
+description = "Bloom: a self-growing team of Flower Agents"
+license = { file = "LICENSE" }
+requires-python = ">=3.11,<4.0"
+dependencies = ["flwr>=1.39.0,<2.0", "openai>=2.16.0,<3.0.0"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["bloom"]
+
+[tool.flwr.app]
+publisher = "vverm"
+display-name = "Bloom"
+fab-format-version = 1
+flwr-version-target = "1.39.0"
+fab-include = ["bloom/**/*.py", "LICENSE"]
+
+[tool.flwr.app.components]
+agentapp = "bloom.agent_app:app"
+
+[tool.flwr.app.config]
+bloom.mode = "orchestrate"
+bloom.input = ""
+bloom.registry = ""
+bloom.routing = "auto"
+bloom.orchestrator-model = "flwrlabs/endeavor-1.0"
+bloom.forge-model = "openai/gpt-5.6-sol"
+bloom.specialist-model = "openai/gpt-5.6-sol"
+bloom.step-timeout = 90
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: runs flwr build"]

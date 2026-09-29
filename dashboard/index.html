@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bloom Dashboard</title>
+<link rel="stylesheet" href="/static/report.css">
+<style>
+  :root {
+    --bg: #0e1311;
+    --panel: #161d1a;
+    --panel-2: #1d2622;
+    --line: #2b3632;
+    --text: #eef3ef;
+    --muted: #93a39b;
+    --green: #6fdc9c;
+    --green-bg: #1d3a2a;
+    --amber: #f5c46b;
+    --amber-bg: #3a3020;
+    --red: #ff8a80;
+    --blue: #7cc4ff;
+    --gray: #6f7c76;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100vh; padding: 18px 28px; gap: 14px; overflow: hidden; }
+
+  /* ── header ── */
+  header { display: flex; align-items: center; gap: 24px; }
+  .logo { font-size: 36px; font-weight: 800; letter-spacing: -0.02em; }
+  .logo span { color: var(--green); }
+  .steps { display: flex; gap: 6px; flex: 1; justify-content: center; flex-wrap: wrap; }
+  .step { display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; font-size: 16px;
+    color: var(--muted); background: var(--panel); border: 1px solid var(--line); white-space: nowrap; transition: all .4s; }
+  .step b { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: 13px; background: var(--panel-2); }
+  .step.done { color: var(--green); border-color: #2d5a41; }
+  .step.done b { background: var(--green-bg); }
+  .step.now { color: var(--bg); background: var(--green); border-color: var(--green); font-weight: 700; }
+  .step.now b { background: rgba(0,0,0,.18); color: var(--bg); }
+  .team-count { text-align: right; line-height: 1; }
+  .team-count small { display: block; color: var(--muted); font-size: 14px; letter-spacing: .1em; text-transform: uppercase; }
+  .team-count strong { font-size: 40px; font-weight: 800; }
+  .team-count strong em { font-style: normal; color: var(--green); }
+
+  /* ── story ── */
+  #story { padding: 4px 4px 0; }
+  #headline { font-size: 38px; font-weight: 800; line-height: 1.15; letter-spacing: -0.01em; }
+  #sub { font-size: 22px; color: var(--muted); margin-top: 6px; min-height: 28px; }
+  .fade { animation: fade .6s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ── main ── */
+  main { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr); gap: 16px; min-height: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; min-height: 0; min-width: 0; position: relative; overflow: hidden; }
+
+  #stage svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .link { stroke: var(--line); stroke-width: 3; }
+  .link.hot { stroke: var(--green); stroke-width: 5; }
+  .card { position: absolute; width: 230px; transform: translate(-50%, -50%); background: var(--panel-2);
+    border: 2px solid var(--line); border-radius: 16px; padding: 12px 14px; transition: left .8s ease, top .8s ease, border-color .3s, box-shadow .3s; }
+  .card .row { display: flex; align-items: center; gap: 10px; }
+  .card .ico { font-size: 30px; line-height: 1; }
+  .card .name { font-size: 20px; font-weight: 800; }
+  .card .job { font-size: 15px; color: var(--muted); margin-top: 6px; line-height: 1.3; }
+  .card .score { position: absolute; top: -12px; right: -10px; background: var(--bg); border: 2px solid var(--line);
+    border-radius: 999px; padding: 2px 10px; font-size: 15px; font-weight: 800; }
+  .card.specialist { border-color: #2d5a41; }
+  .card.busy { border-color: var(--green); box-shadow: 0 0 22px rgba(111,220,156,.45); }
+  .card.new { animation: bloomIn 1.3s cubic-bezier(.2,1.5,.4,1) both; }
+  .card.new::after { content: "NEW"; position: absolute; top: -12px; left: 12px; background: var(--green); color: var(--bg);
+    font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 999px; letter-spacing: .08em; }
+  @keyframes bloomIn { from { transform: translate(-50%, -50%) scale(0); opacity: 0; } to { transform: translate(-50%, -50%) scale(1); opacity: 1; } }
+  .hub { position: absolute; transform: translate(-50%, -50%); width: 150px; height: 150px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #2c5a41, #173022); border: 3px solid var(--green);
+    display: grid; place-items: center; text-align: center; box-shadow: 0 0 40px rgba(111,220,156,.18); }
+  .hub b { font-size: 28px; display: block; }
+  .hub span { font-size: 13px; color: var(--muted); }
+  .dot { position: absolute; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 14px var(--green); pointer-events: none; }
+  .petal { position: absolute; width: 34px; height: 16px; margin: -8px 0 0 -17px; border-radius: 50%; background: #f39bc4; opacity: .85; pointer-events: none; }
+
+  /* ── now card ── */
+  #now { padding: 22px 24px; display: flex; flex-direction: column; gap: 12px; }
+  #now .label { font-size: 14px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  #now .big { font-size: 30px; font-weight: 800; line-height: 1.15; display: flex; gap: 12px; align-items: center; }
+  #now .big .ico { font-size: 40px; }
+  #now .body { font-size: 20px; line-height: 1.4; color: var(--text); }
+  #now .detail { font-size: 17px; color: var(--muted); }
+  #now.approval { border: 3px solid var(--amber); background: linear-gradient(180deg, var(--amber-bg), var(--panel) 70%); }
+  #now.approval .label { color: var(--amber); }
+  #now.joined { border: 3px solid var(--green); background: linear-gradient(180deg, var(--green-bg), var(--panel) 70%); }
+  #now.final { border: 3px solid var(--green); overflow-y: auto; }
+  #now.final .body { font-size: 19px; }
+  .roles { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .role { display: flex; align-items: center; gap: 12px; font-size: 19px; color: var(--muted); }
+  .role i { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: 15px;
+    border: 2px solid var(--line); }
+  .role.done { color: var(--green); } .role.done i { background: var(--green-bg); border-color: var(--green); }
+  .role.active { color: var(--text); font-weight: 700; } .role.active i { border-color: var(--amber); animation: spin 1.2s linear infinite; border-top-color: transparent; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .problem { font-size: 16px; color: var(--red); background: rgba(255,138,128,.08); border-radius: 10px; padding: 10px 12px; }
+  .chain { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 15px; color: var(--muted); }
+  .chain span { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; color: var(--text); }
+  .pass { color: var(--green); font-weight: 800; }
+
+  /* ── footer: before / after ── */
+  footer { display: flex; gap: 14px; align-items: stretch; }
+  #skills { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; flex: 1; }
+  .skill { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 14px; }
+  .skill .t { font-size: 17px; font-weight: 800; margin-bottom: 6px; }
+  .bar { display: grid; grid-template-columns: 76px 1fr 44px; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); margin: 3px 0; }
+  .bar .track { height: 12px; background: var(--panel-2); border-radius: 6px; overflow: hidden; }
+  .bar .fill { height: 100%; border-radius: 6px; transition: width .8s ease; }
+  .bar .v { text-align: right; font-weight: 800; color: var(--text); }
+  .fill.before { background: var(--gray); } .fill.after { background: var(--green); } .fill.tools { background: var(--blue); } .fill.check { background: var(--amber); }
+  .keys { display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+  .keys button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px;
+    font-size: 15px; cursor: pointer; text-align: left; }
+  .keys button:hover { border-color: var(--green); }
+  .keys kbd { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; margin-right: 8px; font-weight: 700; }
+  .caption { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+  /* ── overlays ── */
+  .overlay { position: fixed; inset: 0; background: rgba(8,11,10,.95); display: none; padding: 40px 60px; overflow: auto; z-index: 10; }
+  .overlay.open { display: block; }
+  .overlay h1 { margin: 0 0 6px; font-size: 38px; }
+  .overlay .lead { font-size: 21px; color: var(--muted); margin-bottom: 18px; }
+  .sim { display: inline-block; background: var(--amber); color: var(--bg); font-weight: 800; font-size: 14px; padding: 3px 10px; border-radius: 6px; margin-left: 10px; vertical-align: middle; }
+  #proof-summary { font-size: 26px; font-weight: 700; margin: 10px 0 24px; line-height: 1.35; }
+  #proof-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+  #proof-rows .skill { padding: 14px 18px; }
+  #proof-rows .bar { grid-template-columns: 150px 1fr 52px; font-size: 16px; margin: 6px 0; }
+  #proof-rows .bar .track { height: 16px; }
+  .legend-note { font-size: 15px; color: var(--muted); margin-top: 18px; }
+  #log-list { list-style: none; padding: 0; margin: 0; font-size: 17px; }
+  #log-list li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  #log-list .who { font-weight: 800; }
+  .close { position: fixed; top: 22px; right: 30px; font-size: 16px; color: var(--muted); }
+
+  @media (max-width: 1100px) {
+    body { height: auto; overflow: auto; }
+    main { grid-template-columns: 1fr; }
+    #stage { height: 70vh; }
+    #headline { font-size: 28px; }
+    .steps { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">bl<span>oo</span>m</div>
+  <div class="steps" id="steps"></div>
+  <div class="team-count"><small>Team size</small><strong>1 → <em id="count">1</em></strong></div>
+</header>
+
+<section id="story">
+  <div id="headline">Waiting for Bloom to start…</div>
+  <div id="sub"></div>
+</section>
+
+<main>
+  <section class="panel" id="stage" aria-label="The team"><svg id="links"></svg></section>
+  <section class="panel" id="now" aria-live="polite"></section>
+</main>
+
+<footer>
+  <div id="skills"></div>
+  <div class="keys">
+    <button onclick="toggle('proof')"><kbd>P</kbd>Proof: evaluation report</button>
+    <button onclick="toggle('internals')"><kbd>T</kbd>Agent internals</button>
+    <button onclick="toggle('log')"><kbd>L</kbd>Agent messages</button>
+  </div>
+</footer>
+
+<div class="ov" id="proof"><div class="x">P / Esc to close</div><div id="report"><div id="report-body"></div></div></div>
+<div class="ov" id="internals"><div class="x">T / Esc to close</div><div id="internals-body"></div></div>
+
+<div class="overlay" id="log">
+  <div class="close">press L or Esc to close</div>
+  <h1>Agent messages</h1>
+  <div class="lead">Every message passed between agents, newest first.</div>
+  <ul id="log-list"></ul>
+</div>
+
+<script src="/static/proof.js"></script>
+<script src="/static/trace.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const HUB = "bloom";
+const HUB_ALIASES = new Set(["bloom", "user", "forge", "planner"]);
+let first = true, lastMsg = 0, lastHeadline = "", cards = new Map(), links = new Map(), pos = {}, busyUntil = {};
+
+function toggle(id) {
+  for (const o of document.querySelectorAll(".overlay, .ov")) if (o.id !== id) o.classList.remove("open");
+  $(id).classList.toggle("open");
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "p" || e.key === "P") toggle("proof");
+  else if (e.key === "l" || e.key === "L") toggle("log");
+  else if (e.key === "t" || e.key === "T") toggle("internals");
+  else if (e.key === "Escape") document.querySelectorAll(".overlay, .ov").forEach(o => o.classList.remove("open"));
+});
+
+function drawSteps(story) {
+  $("steps").innerHTML = story.steps.map((name, i) => {
+    const n = i + 1, cls = n < story.step ? "done" : n === story.step ? "now" : "";
+    return `<div class="step ${cls}"><b>${n < story.step ? "✓" : n}</b>${esc(name)}</div>`;
+  }).join("");
+}
+
+function drawStory(story) {
+  if (story.headline !== lastHeadline) {
+    for (const id of ["headline", "sub"]) { const el = $(id); el.classList.remove("fade"); void el.offsetWidth; el.classList.add("fade"); }
+    lastHeadline = story.headline;
+  }
+  $("headline").textContent = story.headline;
+  $("sub").textContent = story.sub || "";
+}
+
+function layout(team) {
+  const box = $("stage").getBoundingClientRect();
+  const cx = box.width / 2, cy = box.height / 2;
+  const rx = Math.max(160, box.width / 2 - 140), ry = Math.max(120, box.height / 2 - 70);
+  pos = { [HUB]: { x: cx, y: cy } };
+  team.forEach((a, i) => {
+    const ang = -Math.PI / 2 + (2 * Math.PI * i) / Math.max(team.length, 1);
+    pos[a.slug] = { x: cx + rx * Math.cos(ang), y: cy + ry * Math.sin(ang) };
+  });
+  $("links").setAttribute("viewBox", `0 0 ${box.width} ${box.height}`);
+}
+
+function drawTeam(team) {
+  const stage = $("stage");
+  layout(team);
+  let hub = stage.querySelector(".hub");
+  if (!hub) {
+    hub = document.createElement("div");
+    hub.className = "hub";
+    hub.innerHTML = `<div><b>bloom</b><span>coordinator<br>(Endeavor)</span></div>`;
+    stage.appendChild(hub);
+  }
+  hub.style.left = pos[HUB].x + "px"; hub.style.top = pos[HUB].y + "px";
+
+  const live = new Set(team.map(a => a.slug));
+  for (const [slug, el] of cards) if (!live.has(slug)) { el.remove(); cards.delete(slug); links.get(slug)?.remove(); links.delete(slug); }
+  const now = performance.now();
+  for (const a of team) {
+    let link = links.get(a.slug);
+    if (!link) { link = document.createElementNS("http://www.w3.org/2000/svg", "line"); link.setAttribute("class", "link"); $("links").appendChild(link); links.set(a.slug, link); }
+    link.setAttribute("x1", pos[HUB].x); link.setAttribute("y1", pos[HUB].y);
+    link.setAttribute("x2", pos[a.slug].x); link.setAttribute("y2", pos[a.slug].y);
+
+    let card = cards.get(a.slug);
+    if (!card) {
+      card = document.createElement("div");
+      card.className = `card ${a.kind}` + (first ? "" : " new");
+      stage.appendChild(card);
+      cards.set(a.slug, card);
+      if (!first) { petals(pos[a.slug]); setTimeout(() => card.classList.remove("new"), 9000); }
+    }
+    card.style.left = pos[a.slug].x + "px"; card.style.top = pos[a.slug].y + "px";
+    card.classList.toggle("busy", (busyUntil[a.slug] || 0) > now);
+    const html = `<div class="row"><span class="ico">${a.icon}</span><span class="name">${esc(a.name)}</span></div>` +
+      `<div class="job">${esc(a.job)}</div>` + (a.score == null ? "" : `<div class="score">${a.score}% right</div>`);
+    if (card.dataset.html !== html) { card.innerHTML = html; card.dataset.html = html; }
+  }
+}
+
+function petals(p) {
+  for (let i = 0; i < 8; i++) {
+    const el = document.createElement("div");
+    el.className = "petal";
+    const ang = i * Math.PI / 4;
+    el.style.left = p.x + "px"; el.style.top = p.y + "px";
+    $("stage").appendChild(el);
+    el.animate([{ transform: `translate(0,0) rotate(${i * 45}deg)`, opacity: .9 },
+                { transform: `translate(${Math.cos(ang) * 150}px, ${Math.sin(ang) * 110}px) rotate(${i * 45}deg)`, opacity: 0 }],
+               { duration: 1600, easing: "ease-out", fill: "forwards" });
+    setTimeout(() => el.remove(), 1700);
+  }
+}
+
+function node(slug) { return HUB_ALIASES.has(slug) ? HUB : slug; }
+function fly(from, to) {
+  const a = pos[node(from)], b = pos[node(to)];
+  if (!a || !b || a === b) return;
+  const dot = document.createElement("div");
+  dot.className = "dot";
+  $("stage").appendChild(dot);
+  dot.animate([{ left: a.x + "px", top: a.y + "px" }, { left: b.x + "px", top: b.y + "px" }], { duration: 700, easing: "ease-in-out" })
+     .onfinish = () => dot.remove();
+  for (const s of [node(from), node(to)]) if (s !== HUB) busyUntil[s] = performance.now() + 1400;
+  const spoke = node(from) === HUB ? node(to) : node(from);
+  const link = links.get(spoke);
+  if (link) { link.classList.add("hot"); setTimeout(() => link.classList.remove("hot"), 800); }
+}
+
+function prettyName(s) {
+  if (HUB_ALIASES.has(s)) return s === "user" ? "User" : "Bloom";
+  return String(s || "").split("-").map(w => w === "sql" ? "SQL" : (w[0] || "").toUpperCase() + w.slice(1)).join(" ");
+}
+
+function handleMessages(msgs) {
+  const fresh = msgs.filter(m => m.id > lastMsg);
+  if (!first) fresh.slice(-6).forEach((m, i) => setTimeout(() => {
+    if (m.via === "bloom") { fly(m.src, HUB); setTimeout(() => fly(HUB, m.dst), 700); } else fly(m.src, m.dst);
+  }, i * 200));
+  if (msgs.length) lastMsg = msgs[msgs.length - 1].id;
+  $("log-list").innerHTML = msgs.slice().reverse().map(m =>
+    `<li><span class="who">${esc(prettyName(m.src))}</span> → <span class="who">${esc(prettyName(m.dst))}</span>: ${esc(m.text)}</li>`).join("");
+}
+
+function drawNow(n) {
+  const el = $("now");
+  el.className = "panel " + (n.kind || "");
+  const ico = n.icon ? `<span class="ico">${n.icon}</span>` : "";
+  let html = "";
+  if (n.kind === "approval") {
+    html = `<div class="label">✋ Waiting for human approval</div><div class="big">${ico}${esc(n.title)}</div>` +
+      `<div class="body">${esc(n.body)}</div><div class="detail">${esc(n.detail)} · uses ${n.tools} tool${n.tools === 1 ? "" : "s"}</div>` +
+      `<div class="detail">${n.owner ? `Sent to the node owner · spec ${esc(n.sha)}… · they approve on their own machine.` : "Approve it in the terminal."}</div>`;
+  } else if (n.kind === "building") {
+    const r = n.roles || {};
+    const row = (k, label) => `<div class="role ${r[k] || "todo"}"><i>${r[k] === "done" ? "✓" : ""}</i>${label}</div>`;
+    html = `<div class="label">The Forge is working</div><div class="big">${ico}${esc(n.title)}</div>` +
+      `<div class="roles">${row("architect", "Architect designs it")}${row("builder", "Builder writes the code")}${row("reviewer", "Reviewer tests it")}</div>` +
+      (n.problem ? `<div class="problem">Reviewer: ${esc(n.problem)}</div>` : "");
+  } else if (n.kind === "joined") {
+    html = `<div class="label">🎉 New teammate</div><div class="big">${ico}${esc(n.title)}</div><div class="body">${esc(n.body)}</div>`;
+  } else if (n.kind === "gap") {
+    html = `<div class="label">⚠️ Skill gap found</div><div class="big">${ico}${esc(n.title)}</div><div class="body">${esc(n.body)}</div>`;
+  } else if (n.kind === "final") {
+    html = `<div class="label">${n.passed ? '<span class="pass">✓ Correct</span> · ' : ""}The team's answer</div>` +
+      `<div class="chain">${(n.chain || []).map(c => `<span>${esc(c)}</span>`).join(" → ")}</div><div class="body">${esc(n.body)}</div>` +
+      (n.proof_ready ? `<div class="detail">📈 Press <b>P</b> to see the proof on unseen questions${n.simulated ? " (simulated in mock mode)" : ""}.</div>` : "");
+  } else if (n.kind === "proof") {
+    html = `<div class="label">Proof</div><div class="big">📈 ${esc(n.title)}</div><div class="body">${esc(n.body)}</div>` +
+      (n.simulated ? `<div class="detail">(These numbers are simulated: mock mode.)</div>` : "");
+  } else {
+    html = `<div class="label">Now</div><div class="big">${esc(n.title || "Watching the team")}</div><div class="body">${esc(n.body || "")}</div>`;
+  }
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+}
+
+function bar(label, v, cls) {
+  return `<div class="bar"><span>${label}</span><div class="track"><div class="fill ${cls}" style="width:${v ?? 0}%"></div></div><span class="v">${v == null ? "–" : v + "%"}</span></div>`;
+}
+
+function drawSkills(rows) {
+  const html = rows.length ? rows.map(r =>
+    `<div class="skill"><div class="t">${r.icon} ${esc(r.skill)}</div>` +
+    bar("Alone", r.before, "before") +
+    (r.after == null ? `<div class="caption">${r.before >= 60 ? "Fine alone: no specialist needed" : "No specialist yet"}</div>`
+                     : bar("Specialist", r.after, "after")) + `</div>`).join("")
+    : `<div class="skill"><div class="t">Scores appear here</div><div class="caption">How often the team gets each kind of question right, before and after its specialist joins.</div></div>`;
+  if ($("skills").dataset.html !== html) { $("skills").innerHTML = html; $("skills").dataset.html = html; }
+}
+
+async function tick() {
+  try {
+    const s = await (await fetch("/api/state", { cache: "no-store" })).json();
+    drawSteps(s.story);
+    drawStory(s.story);
+    $("count").textContent = s.team.length;
+    drawTeam(s.team);
+    handleMessages(s.messages);
+    drawNow(s.story.now);
+    drawSkills(s.before_after);
+    renderProof(s.eval);
+    renderTrace(s.traces);
+    first = false;
+  } catch (e) {
+    $("headline").textContent = "Dashboard server is offline.";
+    $("sub").textContent = "Start it with: uv run python -m dashboard.server";
+  }
+}
+window.addEventListener("resize", () => tick());
+tick();
+setInterval(tick, 700);
+</script>
+</body>
+</html>

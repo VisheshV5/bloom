@@ -9,7 +9,7 @@ const who = (s) => (s === "forge" ? "You" : prettyName(s));
 export default function MessagesDialog({ open, onClose, messages }) {
   const rows = [...(messages || [])].reverse();
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth PaperProps={{ sx: { bgcolor: "#0d1410", backgroundImage: "none", border: "1px solid var(--line)" } }}>
+    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth PaperProps={{ sx: { bgcolor: "var(--panel)", backgroundImage: "none", border: "1px solid var(--line)" } }}>
       <DialogContent sx={{ p: 4 }}>
         <Flex justify="space-between" align="center" mb={3}>
           <Text fontSize="24px" fontWeight={800}>Messages on the Flower Grid</Text>
@@ -27,7 +27,7 @@ export default function MessagesDialog({ open, onClose, messages }) {
                   {m.tier && <Chip size="small" variant="outlined" label={m.tier === "nodes" ? "over the Grid" : m.tier === "inprocess" ? "inside coordinator" : m.tier} />}
                   <Text ml="auto" fontSize="12px" color="var(--muted)">{new Date(m.ts * 1000).toLocaleTimeString()}</Text>
                 </Flex>
-                <Text fontSize="14px" color="#cfdcd3" noOfLines={3}>{m.text}</Text>
+                <Text fontSize="14px" color="var(--ink-2)" noOfLines={3}>{m.text}</Text>
               </Box>
             </motion.div>
           ))}

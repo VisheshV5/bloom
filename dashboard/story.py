@@ -174,6 +174,13 @@ def build_story(events: list[dict], agents_by_slug: dict[str, dict]) -> dict:
                        "detail": f"In {who}'s inbox via node {str(ev.get('node_name') or ev.get('node_id'))}. Waiting for y."}
             else:
                 sub = f"Delivery failed: {ev.get('error')}"
+        elif t == "waiting_owner":  # live demo: one hospital joined, the next owner hasn't said y yet
+            step = 4
+            site = display_name(ev.get("site")) if ev.get("site") else "the data owner"
+            headline = f"Waiting for {site} to approve on their own laptop."
+            sub = "The agent only runs there once its owner reads it and types y."
+            now = {"kind": "approval", "title": f"Waiting for {site}", "icon": icon("sql"),
+                   "body": "Its patient records never leave that laptop. Only totals will come back.", "owner": True}
         elif t == "approval_resolved":
             if not ev.get("approved"):
                 headline = f"The human said no, so {display_name(ev.get('slug'))} was not added."
@@ -185,7 +192,8 @@ def build_story(events: list[dict], agents_by_slug: dict[str, dict]) -> dict:
                 continue
             step = 5
             agent = agents_by_slug.get(slug, {})
-            headline = f"{display_name(slug)} joined the team."
+            site = display_name(ev["site"]) if ev.get("site") else None
+            headline = f"{display_name(slug)} joined the team" + (f" for {site}." if site else ".")
             sub = f"From now on, {skill(agent.get('category')).lower()} questions go to it."
             now = {"kind": "joined", "title": f"Welcome, {display_name(slug)}", "icon": icon(agent.get("category")),
                    "body": job(agent) if agent else ""}

@@ -173,6 +173,28 @@ def discover(grid: GridClient, nodes: list[dict], timeout: float = DISCOVERY_TIM
     return found
 
 
+AWAIT_BUDGET_S = 230  # stay well inside the 5-minute task limit
+AWAIT_POLL_S = 8
+
+
+def ready_sites(discovered: list[dict], specialist: str) -> set[str]:
+    """Sites whose node runs `specialist`, holds its database, and whose owner approved the spec."""
+    return {str(d["site"]).strip().lower().replace(" ", "-") for d in discovered
+            if d.get("specialist") == specialist and d.get("approved") and d.get("has_db") and d.get("site")}
+
+
+def await_sites(grid: GridClient, want: dict, deadline: float, discovered: list[dict]) -> list[dict]:
+    """Re-run discovery inside this run until every wanted site is ready (an owner said y and the node
+    came online) or the time budget ends. Saves queueing a new SuperGrid run for every check."""
+    specialist, sites = want.get("specialist"), set(want.get("sites") or [])
+    while not sites <= ready_sites(discovered, specialist) and time.monotonic() + AWAIT_POLL_S < deadline:
+        time.sleep(AWAIT_POLL_S)
+        nodes = grid.nodes()
+        discovered = discover(grid, nodes) if nodes else []
+        print(f"[bloom] waiting for {sorted(sites)}: ready {sorted(ready_sites(discovered, specialist))}")
+    return discovered
+
+
 def deliver(grid: GridClient, discovered: list[dict], proposal: dict, owner: str | None,
             sender: str, timeout: float = 60) -> dict:
     """Send a proposal to ONE inbox node of `owner` (the part after @ in the node name)."""
@@ -346,11 +368,15 @@ def orchestrate(agent, context, text: str, client=None) -> dict:
     roster = merge_roster(registry, discovered, bool(nodes))
     if job.get("mode") == "deliver":  # Forge -> node owner's inbox, over the Grid
         res = deliver(grid, discovered, job.get("proposal") or {}, job.get("owner"), str(job.get("sender") or ""))
+        if res.get("ok") and job.get("await"):  # keep watching in this same run instead of queueing new ones
+            discovered = await_sites(grid, job["await"], started + AWAIT_BUDGET_S, discovered)
         return {"job_id": job["job_id"], "answer": "delivered" if res.get("ok") else res.get("error"),
                 "output": json.dumps(res), "ok": bool(res.get("ok")), "steps": [], "missing_capabilities": [],
                 "delivered": res, "discovered": discovered, "discovery_ms": disc_ms,
                 "ms": int((time.monotonic() - started) * 1000)}
     if job.get("mode") == "describe":  # warm-up / smoke test: discovery only
+        if job.get("await"):
+            discovered = await_sites(grid, job["await"], started + AWAIT_BUDGET_S, discovered)
         return {"job_id": job["job_id"], "answer": f"{len(discovered)} of {len(nodes)} nodes replied",
                 "output": json.dumps(discovered), "ok": bool(discovered) or not nodes, "steps": [],
                 "missing_capabilities": [], "discovered": discovered, "discovery_ms": disc_ms,

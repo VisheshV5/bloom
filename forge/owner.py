@@ -11,11 +11,12 @@ under --name, adds it to the federation, and starts it with those settings.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from bloom.specs import spec_from_source, spec_hash
 from forge.nodes import NodeManager, load_settings, save_settings
-from forge.paths import PROPOSALS
+from forge.paths import PROPOSALS, ROOT
 
 APPROVED = Path("~/.bloom/approved.json").expanduser()
 
@@ -60,3 +61,28 @@ def approve(slug: str, db: str | None, site: str | None, name: str | None, feder
         # The owner just said yes to exactly this, so the node commands run without a second prompt.
         node = NodeManager("node", confirm=lambda q: True, bus=bus, federation=federation).join(slug)
     return {"approved": True, "spec_sha256": digest, "settings": settings, "node": node}
+
+
+def start_preapproved(slug: str, federation: str | None, bus=None, out=print) -> dict | None:
+    """Start this machine's node for `slug` without a prompt, but ONLY if the owner already approved this
+    exact spec fingerprint (it is in ~/.bloom/approved.json) and saved its settings (db/site/name) earlier
+    with `forge approve`. Anything new or changed still needs a fresh `forge approve` and a typed y."""
+    proposal = json.loads((PROPOSALS / f"{slug}.json").read_text())
+    digest = spec_hash(spec_from_source(proposal["module_source"]))
+    try:
+        approved = set(json.loads(APPROVED.read_text() or "[]"))
+    except (OSError, ValueError):
+        approved = set()
+    settings = load_settings(slug)
+    if digest != proposal.get("spec_sha256") or digest not in approved or not settings.get("db"):
+        out(f"{slug}: not pre-approved on this machine (run `forge approve {slug}` to review it and type y).")
+        return None
+    out(f"{slug}: fingerprint {digest[:12]}… was already approved here; starting {settings.get('site')} node.")
+    keys = ROOT / "keys"
+    if (keys / slug).exists():  # SuperGrid never lets an unregistered node's key be reused: start with a fresh pair
+        backup = ROOT / "runs" / "backup" / "keys" / time.strftime("%Y%m%d-%H%M%S")
+        backup.mkdir(parents=True, exist_ok=True)
+        for f in (keys / slug, keys / f"{slug}.pub"):
+            if f.exists():
+                f.rename(backup / f.name)
+    return NodeManager("node", confirm=lambda q: True, bus=bus, federation=federation).join(slug)

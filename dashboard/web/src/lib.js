@@ -31,7 +31,9 @@ export function buildFlowers(state) {
   const agents = Object.fromEntries((state.agents || []).map((a) => [a.slug, a]));
   const out = [];
   for (const m of state.team || []) {
-    const sited = places.filter((p) => p.slug === m.slug && p.site);
+    // Sites whose nodes joined this session win; otherwise fall back to where the last task ran.
+    const joined = (state.sites || {})[m.slug];
+    const sited = joined?.length ? joined : places.filter((p) => p.slug === m.slug && p.site);
     if (sited.length) {
       for (const p of sited) out.push({ ...m, key: `${m.slug}@${p.site}`, site: p.site, owner: p.owner, node_id: p.node_id });
       continue;
@@ -74,3 +76,42 @@ export function vine(x0, y0, x1, y1) {
 
 export const secs = (ms) => (ms == null ? "" : ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)} s`);
 export const pct = (x) => `${Math.round(100 * x)}%`;
+
+// Agents often reply in terse key=value form ("old_admissions=565, ..."). Turn that into a sentence.
+const num = (v) => Number(v).toLocaleString();
+const rate = (x, n) => `${((100 * x) / n).toFixed(1)}%`;
+export function humanize(answer) {
+  const text = String(answer || "").trim();
+  const kv = Object.fromEntries([...text.matchAll(/(\w+)\s*=\s*([^,;]+)/g)].map((m) => [m[1].toLowerCase(), m[2].trim()]));
+  const n = (k) => Number(String(kv[k] ?? "").replace(/[^\d.eE+-]/g, ""));
+
+  // One hospital's counts
+  if (["old_admissions", "old_readmissions", "new_admissions", "new_readmissions"].every((k) => k in kv)) {
+    const [oa, or, na, nr] = ["old_admissions", "old_readmissions", "new_admissions", "new_readmissions"].map(n);
+    return `Old protocol: ${num(or)} of ${num(oa)} patients were readmitted within 30 days (${rate(or, oa)}). ` +
+      `New protocol: ${num(nr)} of ${num(na)} (${rate(nr, na)}).`;
+  }
+
+  // Pooled statistics: old=1004 admissions/189 readmissions (18.82%), new=..., change=-6.16 pp, z=4.465, p=8.0e-06
+  const pooled = text.match(/old\s*=\s*(\d+)\s*admissions\/(\d+)\s*readmissions\s*\(([\d.]+)%\).*?new\s*=\s*(\d+)\s*admissions\/(\d+)\s*readmissions\s*\(([\d.]+)%\)/i);
+  if (pooled) {
+    const [, oa, or, orate, na, nr, nrate] = pooled;
+    const parts = [`Both hospitals together: ${num(or)} of ${num(oa)} patients readmitted under the old protocol (${orate}%), ` +
+      `${num(nr)} of ${num(na)} under the new one (${nrate}%).`];
+    const change = text.match(/change\s*=\s*([-+−]?[\d.]+)\s*pp/i);
+    if (change) parts.push(`That is a change of ${change[1].replace("-", "−")} percentage points.`);
+    const z = text.match(/\bz\s*=\s*([-\d.]+)/i), p = text.match(/\bp\s*=\s*([\d.eE+-]+)/i);
+    if (z && p) {
+      const pv = Number(p[1]);
+      parts.push(`A two-proportion z-test gives z = ${z[1]}, p ${pv < 0.001 ? "< 0.001" : `= ${pv.toFixed(3)}`}` +
+        (/not\s+significant/i.test(text) ? ", which is not statistically significant." : /significant/i.test(text) ? ", which is statistically significant." : "."));
+    }
+    return parts.join(" ");
+  }
+
+  // Generic key=value list -> "Key: value · Key: value"
+  if (/^(\w+\s*=\s*[^,;]+[,;]\s*)+\w+\s*=\s*[^,;]+\.?$/.test(text)) {
+    return Object.entries(kv).map(([k, v]) => `${k.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase())}: ${v}`).join(" · ");
+  }
+  return text;
+}

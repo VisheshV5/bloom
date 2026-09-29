@@ -64,9 +64,9 @@ class Runner:
         self.bus.emit("info", message=f"{round_label} done", summary=summary)
         return summary
 
-    def run_final(self, max_grow: int = 3) -> dict:
+    def run_final(self, max_grow: int = 3, saved_plan: bool = False) -> dict:
         self.bus.emit("phase", name="final task")
-        task = final_task.TASK
+        task = {**final_task.TASK, "plan": final_task.PLAN} if saved_plan else final_task.TASK
         for _ in range(max_grow + 1):
             result = self.backend.run_task(task, self.registry.snapshot(), mode="plan")
             missing = [m for m in result.missing_capabilities

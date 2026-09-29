@@ -208,9 +208,11 @@ class NodeManager:
         res = self._run(self._register(slug), f"Register SuperNode '{slug}' with SuperGrid")
         node_id = None
         if res is not None:
-            if res.returncode != 0:
+            if res.returncode != 0 or '"success": false' in res.stdout:
                 raise RuntimeError(f"register failed: {res.stderr[-500:] or res.stdout[-500:]}")
             node_id = _parse_node_id(res.stdout)
+            if not node_id:
+                raise RuntimeError(f"register gave no node id: {res.stdout[-500:]}")
         if self.federation and node_id:
             res = self._run(self._add(slug, node_id), f"Add node {node_id} to {self.federation}")
             if res is not None and res.returncode != 0:

@@ -174,6 +174,34 @@ def cmd_deliver(args) -> None:
     print(json.dumps(forge.deliver_proposal(proposal), indent=2, default=str))
 
 
+def cmd_live(args) -> None:
+    from evaluator.runner import Runner
+    from forge.live import run_live
+
+    bus, registry, backend, forge, benchmark = build_stack(args)
+    out = run_live(bus, registry, backend, forge, Runner(backend, registry, bus, forge),
+                   deliver_to=args.deliver_to or "brian", timeout=args.timeout, start_local=not args.ask_b, saved_plan=not args.plan_live)
+    print(json.dumps(out, indent=2, default=str))
+
+
+def cmd_recover_final(args) -> None:
+    """If Bloom stopped listening before the team's answer came back, read it from the run's logs."""
+    from tasks import final_task
+
+    bus, registry, backend, forge, benchmark = build_stack(args)
+    result = backend.recover(args.run_id, {"job_id": final_task.TASK["id"]})
+    passed = final_task.check(result.answer)
+    bus.emit("final_task", answer=result.answer, passed=passed, steps=result.steps,
+             agents=[s.get("specialist") for s in result.steps])
+    print(json.dumps({"answer": result.answer, "passed": passed, "error": result.error}, indent=2))
+
+
+def cmd_node_up(args) -> None:
+    from forge.owner import start_preapproved
+
+    print(json.dumps(start_preapproved(args.slug, args.federation, bus=EventBus(echo=False)), indent=2, default=str))
+
+
 def cmd_session(_args) -> None:
     EventBus(echo=False).emit("phase", name="session start")
     print("Dashboard reset to the Generalist (nothing else changed: agents and nodes keep running).")
@@ -277,6 +305,15 @@ def main(argv=None) -> None:
     p = sub.add_parser("bench"); _common(p); p.add_argument("--limit", type=int)
     p = sub.add_parser("grow"); _common(p); p.add_argument("--category", required=True)
     p = sub.add_parser("final"); _common(p)
+    p = sub.add_parser("live", help="the demo's live part: deliver the hospital agent, wait for owners, answer")
+    _common(p); p.add_argument("--timeout", type=float, default=900)
+    p.add_argument("--ask-b", action="store_true", help="don't auto-start pre-approved Hospital B; approve it by hand")
+    p.add_argument("--plan-live", action="store_true", help="have Endeavor plan live (one extra queued run)")
+    p = sub.add_parser("recover-final", help="read the team's answer from a finale run's logs (flwr ls shows run ids)")
+    _common(p); p.add_argument("run_id", type=int); p.set_defaults(backend="supergrid", federation="@vverm/bloom-team")
+    p = sub.add_parser("node-up", help="start this machine's node for SLUG if its owner already approved that fingerprint")
+    p.add_argument("slug"); p.add_argument("--federation", default="@vverm/bloom-team")
+    p.set_defaults(backend="supergrid", federation="@vverm/bloom-team", deliver_to="brian")
     p = sub.add_parser("eval"); _common(p)
     p.add_argument("--repeats", type=int, default=2)
     p.add_argument("--per-category", type=int, default=6, help="held-out tasks per category (0 = all)")
@@ -305,7 +342,7 @@ def main(argv=None) -> None:
     p.add_argument("--timeout", type=float, default=600)
     args = parser.parse_args(argv)
     RUNS.mkdir(exist_ok=True)
-    {"demo": cmd_demo, "bench": cmd_bench, "grow": cmd_grow, "final": cmd_final, "eval": cmd_eval,
+    {"demo": cmd_demo, "bench": cmd_bench, "grow": cmd_grow, "final": cmd_final, "live": cmd_live, "node-up": cmd_node_up, "recover-final": cmd_recover_final, "eval": cmd_eval,
      "session": cmd_session, "replay": cmd_replay,
      "describe": cmd_describe, "proposals": cmd_proposals, "activate": cmd_activate, "deliver": cmd_deliver,
      "approve": cmd_approve,

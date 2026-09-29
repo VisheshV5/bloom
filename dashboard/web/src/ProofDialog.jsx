@@ -8,8 +8,8 @@ import { CATEGORY_ICON, SvgGlyph } from "./icons.jsx";
 const CATS = { dates: "Dates", sql: "Database", stats: "Statistics", units: "Units" };
 const ARMS = [
   ["generalist", "AI alone", "no tools, no data", "var(--plain)"],
-  ["specialist", "Bloom specialist", "built by the Forge", "var(--green)"],
-  ["generalist_tools", "AI + every tool + all the data", "the ceiling: nothing held back", "#60a5fa"],
+  ["specialist", "Bloom specialist", "built by the Forge", "var(--accent)"],
+  ["generalist_tools", "AI + every tool + all the data", "the ceiling: nothing held back", "var(--tools)"],
 ];
 const BACK = [0.34, 1.56, 0.64, 1];
 
@@ -24,7 +24,7 @@ function EvalFlower({ ev, arm, color, delay }) {
   return (
     <svg viewBox="-200 -172 400 344" width="100%" style={{ maxHeight: 300 }}>
       {[0.5, 0.75, 0.9, 1].map((f) => (
-        <circle key={f} r={18 + R * stretch(f)} fill="none" stroke="#1f2b24" strokeDasharray={f === 1 ? "0" : "2 5"} />
+        <circle key={f} r={18 + R * stretch(f)} fill="none" stroke="var(--line)" strokeDasharray={f === 1 ? "0" : "2 5"} />
       ))}
       {cats.map((c, i) => {
         const s = ev.categories[c][arm];
@@ -49,15 +49,15 @@ function EvalFlower({ ev, arm, color, delay }) {
             <motion.g initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: delay + 0.8 }}>
               {/* icon sits inline, left of the name, so it never leaves the frame or touches a petal */}
               {CATEGORY_ICON[c] && (
-                <SvgGlyph Icon={CATEGORY_ICON[c]} x={lx - (String(CATS[c] || c).length * 6.6) / 2 - 11} y={ly - 10} size={14} color="#cfdcd3" />
+                <SvgGlyph Icon={CATEGORY_ICON[c]} x={lx - (String(CATS[c] || c).length * 6.6) / 2 - 11} y={ly - 10} size={14} color="var(--ink-2)" />
               )}
-              <text x={lx} y={ly - 6} textAnchor="middle" fontSize={13} fill="#cfdcd3">{CATS[c] || c}</text>
+              <text x={lx} y={ly - 6} textAnchor="middle" fontSize={13} fill="var(--ink-2)">{CATS[c] || c}</text>
               <text x={lx} y={ly + 11} textAnchor="middle" fontSize={15} fontWeight={800} fill="var(--ink)">{pct(s.acc)}</text>
             </motion.g>
           </g>
         );
       })}
-      <circle r={16} fill="#0f1612" stroke={color} strokeWidth={2} />
+      <circle r={16} fill="var(--panel)" stroke={color} strokeWidth={2} />
     </svg>
   );
 }
@@ -82,7 +82,7 @@ function Details({ ev }) {
           </React.Fragment>
         ))}
       </Grid>
-      <Text fontSize="14px" color="#cfdcd3" lineHeight={1.7}>
+      <Text fontSize="14px" color="var(--ink-2)" lineHeight={1.7}>
         Specialist vs AI alone: {vsGen?.wins} wins, {vsGen?.losses} losses on the same questions (sign test p = {vsGen?.p?.toExponential(1)}).<br />
         Specialist vs AI + tools: {vsTools?.wins} wins, {vsTools?.losses} losses (p = {vsTools?.p?.toFixed(2)}), no real difference.<br />
         Cost per answer: specialist ≈ {Math.round(ev.cost?.specialist?.tokens || 0).toLocaleString()} tokens vs{" "}
@@ -96,9 +96,9 @@ function Details({ ev }) {
   );
 }
 
-export default function ProofDialog({ open, onClose, ev }) {
+export default function ProofDialog({ open, onClose, ev, beforeAfter }) {
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth PaperProps={{ sx: { bgcolor: "#0d1410", backgroundImage: "none", border: "1px solid var(--line)" } }}>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth PaperProps={{ sx: { bgcolor: "var(--panel)", backgroundImage: "none", border: "1px solid var(--line)" } }}>
       <DialogContent sx={{ p: 5 }}>
         <Flex justify="space-between" align="start">
           <Box>
@@ -116,9 +116,9 @@ export default function ProofDialog({ open, onClose, ev }) {
                 const o = ev.overall?.[arm];
                 return (
                   <motion.div key={arm} initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.25 }}>
-                    <Box textAlign="center" p={3} borderRadius="18px" bg={arm === "specialist" ? "rgba(74,222,128,.06)" : "transparent"}>
+                    <Box textAlign="center" p={3} borderRadius="18px" bg={arm === "specialist" ? "var(--accent-soft)" : "transparent"}>
                       <EvalFlower ev={ev} arm={arm} color={color} delay={0.3 + i * 0.35} />
-                      <Text fontSize="20px" fontWeight={800} color={color} minH="30px" noOfLines={1}>{name}</Text>
+                      <Text fontSize="20px" fontWeight={800} color={color} minH="30px" lineHeight={1.2}>{name}</Text>
                       <Text fontSize="13px" color="var(--muted)">{what}</Text>
                       {o && (
                         <Tooltip title={`${o.correct} of ${o.n} right. 95% Wilson interval ${pct(o.ci[0])}–${pct(o.ci[1])}`}>
@@ -135,9 +135,9 @@ export default function ProofDialog({ open, onClose, ev }) {
               Each petal is a question type. Longer petal = right more often (scaled so small gaps are easy to see; rings mark 50%, 75%, 90%, 100%). The faint halo = the 95% error bar.
             </Text>
             <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 1.6 }}>
-              <Box mt={6} p={5} borderRadius="16px" border="1px solid var(--green)" bg="rgba(74,222,128,.07)">
+              <Box mt={6} p={5} borderRadius="16px" border="1px solid var(--green)" bg="var(--green-soft)">
                 <Text fontSize="22px" fontWeight={800}>The win comes from access, not a smarter brain.</Text>
-                <Text fontSize="16px" color="#cfdcd3" mt={2} lineHeight={1.6}>
+                <Text fontSize="16px" color="var(--ink-2)" mt={2} lineHeight={1.6}>
                   On its own, the AI got {pct(ev.overall?.generalist?.acc || 0)} right. With every tool and all the data, or as a Bloom specialist, it got
                   {" "}{(() => { const [lo, hi] = [ev.overall?.generalist_tools?.acc || 0, ev.overall?.specialist?.acc || 0].sort((a, b) => a - b);
                     return lo === hi ? pct(lo) : `${pct(lo)}–${pct(hi)}`; })()}.
@@ -153,6 +153,18 @@ export default function ProofDialog({ open, onClose, ev }) {
               <AccordionDetails><Details ev={ev} /></AccordionDetails>
             </Accordion>
           </>
+        )}
+        {beforeAfter?.length > 0 && (
+          <section className="practice-results" aria-label="Practice results">
+            <h3>Practice results</h3>
+            <p>Accuracy before and after adding specialists.</p>
+            {beforeAfter.map(row => (
+              <div className="practice-row" key={row.category}>
+                <span>{row.skill}</span>
+                <span>{row.before == null ? "—" : `${row.before}%`} → <strong>{row.after == null ? "—" : `${row.after}%`}</strong></span>
+              </div>
+            ))}
+          </section>
         )}
       </DialogContent>
     </Dialog>

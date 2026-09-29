@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -61,6 +62,104 @@ def places(registry_agents: list[dict], nodes: dict, trace: dict | None) -> list
         out.append({"specialist": spec, "slug": base, "site": site or None, "node_id": nid,
                     "tier": st.get("tier"), "owner": owner})
     return out
+
+
+def stage(events: list[dict]) -> str:
+    """replay -> ready (replay finished, waiting for Continue) -> live."""
+    phases = [e.get("name") for e in events if e["type"] == "phase"]
+    if "live" in phases:
+        return "live"
+    if phases and phases[-1] == "replay done":
+        return "ready"
+    return "replay" if any(e.get("replay") for e in events) else "live"
+
+
+HOSPITAL_OWNERS = {"hospital-a": "Brian", "hospital-b": "Vishesh"}
+
+
+def _site(slug: str) -> str:
+    return slug.replace("-", " ").title()
+
+
+def activity(events: list[dict]) -> dict | None:
+    """One plain sentence for what Bloom is doing right now in the live part, and since when.
+    `waiting` is True while a hospital owner still has to approve (the garden grows a seedling)."""
+    live = next((i for i, e in enumerate(events) if e["type"] == "phase" and e.get("name") == "live"), None)
+    if live is None:
+        return None
+    text, since, waiting = "Starting the live run…", events[live]["ts"], False
+    joined: list[str] = []
+    for e in events[live + 1:]:
+        t = e["type"]
+        if t == "gap_flagged":
+            text, since = "Bloom spotted a gap: no agent on the team can read patient records.", e["ts"]
+        elif t == "proposal" or (t == "forge_stage" and e.get("stage") == "delivering"):
+            text, since, waiting = ("Sending the hospital records agent to Brian's laptop over the Flower Grid, then "
+                                    "waiting for him to read it and type y. Hospital B is Vishesh's and was approved "
+                                    "earlier. (A Grid run can sit in SuperGrid's queue for a minute or two first.)"), e["ts"], True
+        elif t == "delivered":
+            text, since, waiting = ("Delivered. Waiting for Brian to read the agent's code and type y…", e["ts"], True) \
+                if e.get("ok") else (f"Delivery failed: {e.get('error')}", e["ts"], False)
+        elif t in ("node_joined", "waiting_owner") and e.get("site"):
+            if t == "node_joined" and e["site"] not in joined:
+                joined.append(e["site"])
+            missing = [s for s in HOSPITAL_OWNERS if s not in joined]
+            if missing:
+                s0 = missing[0]
+                text = f"{', '.join(_site(j) for j in joined)} joined. Waiting for {HOSPITAL_OWNERS[s0]} to approve {_site(s0)} on their laptop…"
+                since, waiting = e["ts"], True
+            else:
+                text, since, waiting = "Both hospitals joined. Starting the question…", e["ts"], False
+        elif t == "phase" and e.get("name") == "final task":
+            text, since, waiting = ("Asking the question: the Coordinator plans which agents to use, then each hospital "
+                                    "counts its own records and the Stats and Writing agents finish the answer "
+                                    "(about 3–4 minutes)…"), e["ts"], False
+        elif t == "final_task":
+            return None
+    return {"text": text, "since": since, "waiting": waiting}
+
+
+def sites(events: list[dict]) -> dict[str, list[dict]]:
+    """Per agent, the hospital sites whose nodes joined this session (one flower each)."""
+    out: dict[str, list[dict]] = {}
+    for e in events:
+        if e["type"] == "node_joined" and e.get("site"):
+            out.setdefault(e["slug"], [])
+            if all(x["site"] != e["site"] for x in out[e["slug"]]):
+                out[e["slug"]].append({"site": e["site"], "owner": e.get("owner"), "node_id": e.get("node_id")})
+    return out
+
+
+LIVE_LOG = RUNS / "live.log"
+_live_proc = None
+
+
+def start_live() -> tuple[int, dict]:
+    """Continue button: start `python -m forge live` in the background (once)."""
+    global _live_proc
+    if _live_proc is not None and _live_proc.poll() is None:
+        return 409, {"ok": False, "error": "already running"}
+    import subprocess
+    import sys
+
+    log = open(LIVE_LOG, "w")
+    _live_proc = subprocess.Popen([sys.executable, "-m", "forge", "live"], cwd=HERE.parent, stdout=log,
+                                  stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                  start_new_session=True,  # restarting the dashboard must not kill the demo
+                                  env={**os.environ, "PYTHONUNBUFFERED": "1"})  # live.log updates as it happens
+    return 200, {"ok": True, "pid": _live_proc.pid, "log": str(LIVE_LOG)}
+
+
+def last_question(events: list[dict]) -> str | None:
+    """The full text of the latest team-task question (message text is shortened for the log)."""
+    msg = next((e for e in reversed(events) if e["type"] == "message" and e.get("src") in ("forge", "user")), None)
+    if not msg:
+        return None
+    if msg.get("question"):
+        return msg["question"]
+    from tasks.final_task import PROMPT  # older events only kept the first 140 characters
+    text = str(msg.get("text") or "")
+    return PROMPT if PROMPT.startswith(text) else text
 
 
 def build_state() -> dict:
@@ -169,6 +268,10 @@ def build_state() -> dict:
     return {
         "replay": replay,
         "nodes": nodes,
+        "question": last_question(all_events),
+        "stage": stage(events),
+        "activity": activity(events),
+        "sites": sites(events),
         "places": places(registry.get("agents", []), nodes, traces[-1] if traces else None),
         "session": session_id is not None,
         "traces": traces,
@@ -198,6 +301,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def do_POST(self):  # noqa: N802
+        # The custom header forces a CORS preflight (which this server never answers), so other
+        # websites open in the same browser cannot press Continue.
+        if urlparse(self.path).path != "/api/continue" or self.headers.get("X-Bloom") != "continue":
+            self._send(b"not found", "text/plain", 404)
+            return
+        status, body = start_live()
+        self._send(json.dumps(body).encode(), "application/json", status)
+
     def do_GET(self):  # noqa: N802
         url = urlparse(self.path)
         dist = HERE / "dist"
@@ -207,7 +319,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send((HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
         elif url.path.startswith("/assets/") and (dist / "assets").exists():
             path = (dist / url.path.lstrip("/")).resolve()
-            types = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
+            types = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml",
+                     ".woff2": "font/woff2", ".woff": "font/woff"}
             if path.parent != (dist / "assets").resolve() or not path.exists():
                 self._send(b"not found", "text/plain", 404)
             else:

@@ -58,8 +58,9 @@ def replay(bus, registry, seconds_per_agent: float = 8.0, pause: float = 2.0, ex
     if reset:
         bus.emit("phase", name="session start", replay=True)
         sleep(pause * 2)
-    miss = next((e for e in history if e["type"] == "task_result" and e.get("agent") == "generalist"
-                 and e.get("category") == "sql" and not e.get("correct")), None)
+    replaying_sql = any((registry.get(slug) or {}).get("category") == "sql" for slug, _ in cycles)
+    miss = replaying_sql and next((e for e in history if e["type"] == "task_result" and e.get("agent") == "generalist"
+                                   and e.get("category") == "sql" and not e.get("correct")), None)
     if miss:
         fields = {k: v for k, v in miss.items() if k not in ("id", "ts", "type")}
         bus.emit("task_result", **fields, replay=True, recorded_ts=miss["ts"])

@@ -172,7 +172,7 @@
         "version": 1
       },
       "module": "bloom/specialists/date_analyst.py",
-      "status": "active",
+      "status": "retired",
       "created_at": "2026-09-29T18:10:10Z",
       "created_by": [
         "architect",
@@ -186,7 +186,9 @@
         "name": "date-analyst"
       },
       "hub": null,
-      "scores": {}
+      "scores": {},
+      "retired_at": "2026-09-29T21:59:57Z",
+      "retired_reason": "replaced for the hospital scenario"
     },
     {
       "slug": "unit-converter",
@@ -216,7 +218,7 @@
         "version": 1
       },
       "module": "bloom/specialists/unit_converter.py",
-      "status": "active",
+      "status": "retired",
       "created_at": "2026-09-29T18:20:52Z",
       "created_by": [
         "architect",
@@ -230,7 +232,9 @@
         "name": "unit-converter"
       },
       "hub": null,
-      "scores": {}
+      "scores": {},
+      "retired_at": "2026-09-29T21:59:57Z",
+      "retired_reason": "replaced for the hospital scenario"
     },
     {
       "slug": "writing-editor",
@@ -347,7 +351,7 @@
         "version": 1
       },
       "module": "bloom/specialists/currency_calculator.py",
-      "status": "active",
+      "status": "retired",
       "created_at": "2026-09-29T20:41:48Z",
       "created_by": [
         "architect",
@@ -363,7 +367,9 @@
       "hub": null,
       "scores": {},
       "spec_sha256": "01ffcd11b335330f12869a1c6b25e57602b06adc6764b27e2c165fb938966519",
-      "activated_at": "2026-09-29T20:52:54Z"
+      "activated_at": "2026-09-29T20:52:54Z",
+      "retired_at": "2026-09-29T21:59:57Z",
+      "retired_reason": "replaced for the hospital scenario"
     },
     {
       "slug": "hospital-sql-analyst",
@@ -400,16 +406,16 @@
         "builder",
         "reviewer"
       ],
-      "approved_by": "node-owner:brianhuang08",
+      "approved_by": "node-owner:brian",
       "node": {
         "mode": "node",
-        "node_id": "7563003871865368859",
-        "name": "hospital-sql-analyst@brianhuang08"
+        "node_id": "897638724435360919",
+        "name": "hospital-sql-analyst@brian"
       },
       "hub": null,
       "scores": {},
       "spec_sha256": "81cf99f414d9ee5ac7e561e91139213a4815551b2eec8386ddc49a6ab6247c19",
-      "activated_at": "2026-09-29T21:19:30Z"
+      "activated_at": "2026-09-29T23:14:04Z"
     }
   ],
   "forge_log": [

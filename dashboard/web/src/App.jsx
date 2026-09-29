@@ -1,10 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Box, Flex, Grid, Text } from "@chakra-ui/react";
-import { Button } from "@mui/material";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, MotionConfig } from "framer-motion";
 import useApiState from "./useApiState.js";
 import { buildFlowers } from "./lib.js";
-import { LocalFlorist, agentIcon } from "./icons.jsx";
+import bloomMark from "./assets/bloom.svg";
 import TopBar from "./TopBar.jsx";
 import Garden from "./Garden.jsx";
 import NowCard from "./NowCard.jsx";
@@ -12,98 +10,109 @@ import ProofDialog from "./ProofDialog.jsx";
 import StoryDialog from "./StoryDialog.jsx";
 import MessagesDialog from "./MessagesDialog.jsx";
 
-function BeforeAfter({ rows }) {
-  if (!rows?.length) return null;
+// Always say what Bloom is doing during the live part, with a running timer so waiting never feels stuck.
+function ActivityBar({ activity }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  if (!activity) return null;
+  const secs = Math.max(0, Math.round(now / 1000 - activity.since));
+  const clock = secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, "0")}s`;
   return (
-    <Box mt={4} p={4} borderRadius="16px" border="1px solid var(--line)">
-      <Text fontSize="12px" letterSpacing=".12em" color="var(--muted)" fontWeight={700} mb={2}>PRACTICE QUESTIONS · BEFORE → AFTER</Text>
-      {rows.map((r) => (
-        <Flex key={r.category} align="center" gap={3} py={1}>
-          <Flex w="160px" align="center" gap={2} fontSize="14px">{React.createElement(agentIcon(null, r.category), { sx: { fontSize: 18, color: "var(--muted)" } })}{r.skill}</Flex>
-          <Text w="44px" textAlign="right" color="var(--muted)" fontWeight={700}>{r.before ?? "—"}{r.before != null && "%"}</Text>
-          <Box flex={1} h="8px" bg="#18221c" borderRadius="4px" position="relative" overflow="hidden">
-            <motion.div style={{ position: "absolute", inset: 0, background: "var(--green)", borderRadius: 4, transformOrigin: "left" }}
-              initial={{ scaleX: (r.before || 0) / 100 }} animate={{ scaleX: (r.after ?? r.before ?? 0) / 100 }} transition={{ duration: 1.2 }} />
-          </Box>
-          <Text w="44px" fontWeight={800} color="var(--green)">{r.after ?? "—"}{r.after != null && "%"}</Text>
-        </Flex>
-      ))}
-    </Box>
+    <AnimatePresence mode="wait">
+      <motion.div key={activity.text} className="activity-bar"
+        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.3 }}>
+        <span className="activity-dot" aria-hidden />
+        <div>
+          <strong>Happening now</strong>
+          <p role="status">{activity.text}</p>
+        </div>
+        <time>{clock}</time>
+      </motion.div>
+    </AnimatePresence>
   );
 }
 
-function Legend() {
-  const dot = (c) => <Box as="span" display="inline-block" w="10px" h="10px" borderRadius="50%" bg={c} mr={2} />;
+// After the replay, one press starts the live part: deliver the hospital agent to its owners, then answer.
+function ContinueButton({ stage }) {
+  const [state, setState] = useState("idle");
+  if (stage !== "ready" && state !== "starting") return null;
+  const go = async () => {
+    setState("starting");
+    try {
+      const res = await fetch("/api/continue", { method: "POST", headers: { "X-Bloom": "continue" } });
+      setState(res.ok ? "started" : "error");
+    } catch { setState("error"); }
+  };
   return (
-    <Box mt={4} fontSize="13px" color="var(--muted)" lineHeight={1.9}>
-      <Flex gap={5} wrap="wrap">
-        <span>{dot("var(--brian)")}Brian's laptop</span>
-        <span>{dot("var(--vishesh)")}Vishesh's laptop</span>
-        <span>{dot("var(--plain)")}inside the coordinator</span>
-      </Flex>
-      <Text>New agents grow on a golden-angle spiral (137.5°), like sunflower seeds. Green vines = a question going out; a bud = the answer coming back.</Text>
-    </Box>
+    <motion.button className="continue-btn" onClick={go} disabled={state === "starting"}
+      initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+      {state === "starting" ? "Starting…" : state === "error" ? "Couldn't start. Try again" : "Continue live →"}
+      <span>Ask both hospitals for their records</span>
+    </motion.button>
   );
 }
 
 export default function App() {
   const { state, online } = useApiState(700);
   const [open, setOpen] = useState(null);
-  const flowers = useMemo(() => (state ? buildFlowers(state) : []), [state]);
+  const flowers = useMemo(() => state ? buildFlowers(state) : [], [state]);
 
   useEffect(() => {
-    const onKey = (e) => {
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const k = e.key.toLowerCase();
-      if (k === "escape") setOpen(null);
-      else if (k === "p" || k === "t" || k === "l") setOpen((o) => (o === k ? null : k));
+    const onKey = e => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest?.("input, textarea, select, [contenteditable=true]")) return;
+      const key = e.key.toLowerCase();
+      if (key === "escape") setOpen(null);
+      else if (["p", "t", "l"].includes(key)) setOpen(value => value === key ? null : key);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  if (!state) {
-    return (
-      <Flex h="100vh" align="center" justify="center" direction="column" gap={3}>
-        <motion.div animate={{ scale: [1, 1.2, 1], rotate: [0, 20, 0] }} transition={{ duration: 1.6, repeat: Infinity }} style={{ display: "inline-flex" }}><LocalFlorist sx={{ fontSize: 64, color: "#f472b6" }} /></motion.div>
-        <Text color="var(--muted)">{online ? "Loading Bloom…" : "Can't reach the Bloom server on this machine."}</Text>
-      </Flex>
-    );
-  }
-  const story = state.story || {};
+  if (!state) return (
+    <main className="loading-screen">
+      <img src={bloomMark} alt="" width="48" height="48" />
+      <p role="status">{online ? "Loading Bloom…" : "Waiting for the Bloom server. Retrying automatically…"}</p>
+    </main>
+  );
 
+  const story = state.story || {};
   return (
-    <Flex direction="column" h={{ base: "auto", lg: "100vh" }} minH="100vh">
-      <TopBar story={story} replay={state.replay} teamSize={state.team?.length || 0} online={online} />
-      <Box px={{ base: 4, lg: 10 }} pt={2}>
-        <AnimatePresence mode="wait">
-          <motion.div key={story.headline} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.4 }}>
-            <Text fontSize="34px" fontWeight={850} lineHeight={1.15}>{story.headline}</Text>
-            <Text fontSize="17px" color="var(--muted)" mt={1} noOfLines={1}>{story.sub || " "}</Text>
-          </motion.div>
-        </AnimatePresence>
-      </Box>
-      <Grid templateColumns={{ base: "1fr", lg: "1.9fr 1fr" }} gap={6} px={{ base: 4, lg: 8 }} pb={5} flex={1} minH={0}>
-        <Box minH={{ base: "420px", lg: 0 }} position="relative">
-          <Garden flowers={flowers} messages={state.messages} now={story.now} lastEventId={state.last_event_id} />
-        </Box>
-        <Flex direction="column" minH={0} overflowY="auto" pt={4} pr={2} sx={{ "& > *": { flexShrink: 0 } }}>
-          <NowCard now={story.now} />
-          <Flex gap={3} mt={4}>
-            {[["p", "Proof"], ["t", "What happened"], ["l", "Messages"]].map(([k, label]) => (
-              <Button key={k} variant={k === "p" ? "contained" : "outlined"} size="large" onClick={() => setOpen(k)}
-                sx={{ flex: 1, textTransform: "none", fontWeight: 700, fontSize: 15, py: 1.4 }}>
-                <span className="kbd">{k.toUpperCase()}</span>{label}
-              </Button>
-            ))}
-          </Flex>
-          <BeforeAfter rows={state.before_after} />
-          <Legend />
-        </Flex>
-      </Grid>
-      <ProofDialog open={open === "p"} onClose={() => setOpen(null)} ev={state.eval} />
-      <StoryDialog open={open === "t"} onClose={() => setOpen(null)} state={state} />
-      <MessagesDialog open={open === "l"} onClose={() => setOpen(null)} messages={state.messages} />
-    </Flex>
+    <MotionConfig reducedMotion="user">
+      <div className="app-shell">
+        <TopBar replay={state.replay} stage={state.stage} online={online} onOpen={setOpen} />
+        <main id="main">
+          <section className="page-intro">
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div key={story.headline} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: .2 }}>
+                <h1>{story.headline || "Your team"}</h1>
+                {story.sub && <p>{story.sub}</p>}
+              </motion.div>
+            </AnimatePresence>
+          </section>
+          {!online && <p className="connection-notice">Connection interrupted. Showing the last received update.</p>}
+          <div className="workspace-grid">
+            <section className="garden-panel" aria-label="Agent garden">
+              <span className="team-count">{state.team?.length || 0} agents</span>
+              <div className="garden-canvas">
+                <Garden flowers={flowers} messages={state.messages} now={state.activity?.waiting ? { kind: "approval" } : story.now} lastEventId={state.last_event_id} state={state} />
+              </div>
+              <div className="legend" aria-label="Agent locations">
+                <span><i style={{ background: "var(--brian)" }} />Brian’s laptop</span>
+                <span><i style={{ background: "var(--vishesh)" }} />Vishesh’s laptop</span>
+                <span><i style={{ background: "var(--plain)" }} />Coordinator</span>
+              </div>
+            </section>
+            <aside className="activity-column" aria-label="Current activity">
+              <ContinueButton stage={state.stage} />
+              <ActivityBar activity={state.activity} />
+              <NowCard now={story.now} onProof={() => setOpen("p")} />
+            </aside>
+          </div>
+        </main>
+        <ProofDialog open={open === "p"} onClose={() => setOpen(null)} ev={state.eval} beforeAfter={state.before_after} />
+        <StoryDialog open={open === "t"} onClose={() => setOpen(null)} state={state} />
+        <MessagesDialog open={open === "l"} onClose={() => setOpen(null)} messages={state.messages} />
+      </div>
+    </MotionConfig>
   );
 }

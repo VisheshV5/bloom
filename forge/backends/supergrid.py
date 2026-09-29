@@ -32,7 +32,7 @@ def parse_jobs(output: str) -> list[dict]:
         except ValueError:
             continue
     return jobs
-RUN_TIMEOUT_S = 420  # includes time queued on SuperGrid
+RUN_TIMEOUT_S = 600  # includes time queued on SuperGrid (can be minutes) and in-run waiting for owners
 DISCOVERY_FIELDS = ("specialist", "node_id", "node_name", "site", "has_db", "approved", "model", "inbox")
 EVAL_BATCH_SIZE = 6  # jobs per AgentApp run, all in parallel: one wave stays well under 5 minutes
 EVAL_PARALLEL_RUNS = 3
@@ -108,16 +108,25 @@ class SuperGridBackend:
         result["ms"] = int((time.monotonic() - started) * 1000)
         return result
 
-    def deliver(self, proposal: dict, owner: str | None, sender: str = "vverm") -> dict:
-        """Send a proposal over the Grid to the owner's inbox node (a short coordinator run)."""
+    def deliver(self, proposal: dict, owner: str | None, sender: str = "vverm", await_sites: dict | None = None) -> dict:
+        """Send a proposal over the Grid to the owner's inbox node (a short coordinator run). With
+        await_sites={"specialist", "sites"}, the same run keeps watching until those sites are ready;
+        the final discovery comes back under "discovered"."""
         job = {"task": f"deliver {proposal.get('slug')}", "mode": "deliver", "proposal": proposal,
                "owner": owner, "sender": sender, "job_id": f"deliver-{proposal.get('slug')}"}
+        if await_sites:
+            job["await"] = await_sites
         res = self._run("orchestrate", job, [])
-        return res.get("delivered") or {"ok": False, "error": res.get("error") or "no delivery result"}
+        out = res.get("delivered") or {"ok": False, "error": res.get("error") or "no delivery result"}
+        return {**out, "discovered": res.get("discovered") or []}
 
-    def describe(self, registry: list[dict]) -> dict:
-        """Discovery-only run: every node answers describe. Doubles as warm-up for fresh nodes."""
-        res = self._run("orchestrate", {"task": "describe", "mode": "describe", "job_id": "describe"}, registry)
+    def describe(self, registry: list[dict], await_sites: dict | None = None) -> dict:
+        """Discovery-only run: every node answers describe. Doubles as warm-up for fresh nodes.
+        With await_sites, keeps re-discovering inside the run until those sites are ready."""
+        job = {"task": "describe", "mode": "describe", "job_id": "describe"}
+        if await_sites:
+            job["await"] = await_sites
+        res = self._run("orchestrate", job, registry)
         found = res.get("discovered") or []
         self.bus.emit("info", message=f"discovery: {len(found)} node(s) replied in {res.get('discovery_ms')}ms",
                       discovered=[{k: d.get(k) for k in DISCOVERY_FIELDS} for d in found])
@@ -141,19 +150,8 @@ class SuperGridBackend:
         return [str(n) for n in res.get("notes", [])]
 
     # ── tasks ──────────────────────────────────────────────────────────────
-    def run_task(self, task: dict, registry: list[dict], mode: str = "single") -> TaskResult:
-        job = {"task": task["prompt"], "mode": task.get("mode", mode), "job_id": task.get("id")}
-        self.bus.emit("message", src="forge", dst="bloom", node_id=None, text=task["prompt"][:140])
-        planned_ms = None
-        if job["mode"] == "plan":  # run 1: Endeavor plans; run 2: execute over the Grid
-            planned = self._run("plan", job, registry)
-            planned_ms = planned.get("ms")
-            if planned.get("steps"):
-                job["plan"] = planned["steps"]
-                job["missing_capabilities"] = planned.get("missing_capabilities", [])
-                self.bus.emit("info", message=f"Endeavor planned {len(planned['steps'])} steps in {planned.get('ms', 0) // 1000}s",
-                              plan=[s["specialist"] for s in planned["steps"]])
-        res = self._run("orchestrate", job, registry)
+    def report_task(self, job: dict, res: dict, planned_ms=None) -> TaskResult:
+        """Turn an orchestrate result into dashboard events (messages, trace) and a TaskResult."""
         steps = res.get("steps") or []
         for s in steps:
             self.bus.emit("message", src="bloom", dst=s.get("specialist"), node_id=s.get("node_id"),
@@ -164,9 +162,8 @@ class SuperGridBackend:
             self.bus.emit("info", message=f"discovery: {len(res['discovered'])} node(s)",
                           discovered=[{k: d.get(k) for k in DISCOVERY_FIELDS} for d in res["discovered"]])
         if steps:
-            self.bus.emit("trace", job_id=job["job_id"], run_id=res.get("run_id"), simulated=False,
-                          total_ms=res.get("ms"), plan_ms=(planned_ms if job.get("plan") else None),
-                          federation=self.federation, steps=steps)
+            self.bus.emit("trace", job_id=job.get("job_id"), run_id=res.get("run_id"), simulated=False,
+                          total_ms=res.get("ms"), plan_ms=planned_ms, federation=self.federation, steps=steps)
         return TaskResult(
             answer=res.get("answer"), output=res.get("output", ""),
             agent=steps[-1]["specialist"] if steps else "generalist",
@@ -174,6 +171,33 @@ class SuperGridBackend:
             missing_capabilities=res.get("missing_capabilities") or [],
             error=res.get("error"), ms=res.get("ms", 0),
         )
+
+    def recover(self, run_id: int, job: dict) -> TaskResult:
+        """Read a finished (or still running) run's result from its Flower logs, e.g. after we stopped
+        listening because SuperGrid kept it queued too long."""
+        from forge.flower_client import follow_logs
+
+        res = parse_result(follow_logs(int(run_id), self.connection, timeout=RUN_TIMEOUT_S)) or {}
+        res.setdefault("run_id", run_id)
+        return self.report_task(job, res)
+
+    def run_task(self, task: dict, registry: list[dict], mode: str = "single") -> TaskResult:
+        job = {"task": task["prompt"], "mode": task.get("mode", mode), "job_id": task.get("id")}
+        self.bus.emit("message", src="forge", dst="bloom", node_id=None, text=task["prompt"][:140], question=task["prompt"])
+        planned_ms = None
+        if task.get("plan"):  # a saved plan: skip the planning run and execute straight away
+            job["plan"] = task["plan"]
+            self.bus.emit("info", message="Using the saved plan", plan=[s["specialist"] for s in task["plan"]])
+        elif job["mode"] == "plan":  # run 1: Endeavor plans; run 2: execute over the Grid
+            planned = self._run("plan", job, registry)
+            planned_ms = planned.get("ms")
+            if planned.get("steps"):
+                job["plan"] = planned["steps"]
+                job["missing_capabilities"] = planned.get("missing_capabilities", [])
+                self.bus.emit("info", message=f"Endeavor planned {len(planned['steps'])} steps in {planned.get('ms', 0) // 1000}s",
+                              plan=[s["specialist"] for s in planned["steps"]])
+        res = self._run("orchestrate", job, registry)
+        return self.report_task(job, res, planned_ms if job.get("plan") and not task.get("plan") else None)
 
     def run_with_spec(self, spec: dict, task: dict) -> TaskResult:
         res = self._run("solve", {"spec": spec, "task": task["prompt"], "job_id": task.get("id")})

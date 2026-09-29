@@ -7,7 +7,9 @@ from typing import Callable
 
 from bloom import llm
 from bloom.grid_client import GridClient
-from bloom.protocol import Capabilities, Result, Step, is_describe
+import json
+
+from bloom.protocol import MAX_PROPOSAL_CHARS, Capabilities, Result, Step, is_describe, parse_kind
 from bloom.specialists import default_postprocess, load_specialist, spec_from_module
 from bloom.specs import DEFAULT_SPECIALIST_MODEL, load_approved, spec_hash
 from bloom.tools import sql
@@ -18,6 +20,12 @@ NODE_MODEL_KEY = "bloom-model"  # a node whose provider is e.g. Nebius must call
 NODE_DB_KEY = "bloom-db"  # absolute path to the data owner's SQLite file (never in the FAB)
 NODE_APPROVED_KEY = "bloom-approved"  # JSON list of spec_sha256 values the node owner approved
 NODE_NAME_KEY = "bloom-node-name"
+NODE_INBOX_KEY = "bloom-inbox"
+NODE_SITE_KEY = "bloom-site"  # e.g. "Hospital A": the organisation whose data this node holds
+
+
+def site_slug(site: str | None) -> str | None:
+    return str(site).strip().lower().replace(" ", "-") if site else None  # owner opt-in: directory where Grid-delivered proposals are written
 
 
 def resolve_spec(slug: str, payload_spec: dict | None, node_specialty: str | None = None
@@ -111,16 +119,59 @@ def capabilities(node_config: dict) -> Capabilities:
     node_model = node_config.get(NODE_MODEL_KEY)
     approved = load_approved(node_config.get(NODE_APPROVED_KEY))
     mod = load_specialist(str(slug)) if slug else None
+    inbox = bool(node_config.get(NODE_INBOX_KEY))
+    site = node_config.get(NODE_SITE_KEY)
     if mod is None:
         return Capabilities(specialist=None, model=str(node_model or ""), has_db=sql.available(),
-                            node_name=node_config.get(NODE_NAME_KEY))
+                            node_name=node_config.get(NODE_NAME_KEY), inbox=inbox, site=site)
     spec = spec_from_module(mod)
     digest = spec_hash(spec)
     return Capabilities(
         specialist=spec["slug"], category=spec.get("category"), purpose=spec.get("purpose", ""),
         tools=[t for t in spec.get("tools", []) if available(t)], model=str(node_model or spec.get("model") or ""),
         has_db=sql.available(), node_name=node_config.get(NODE_NAME_KEY),
-        approved=approved is None or digest in approved, spec_sha256=digest)
+        approved=approved is None or digest in approved, spec_sha256=digest, inbox=inbox, site=site)
+
+
+def receive_proposal(node_config: dict, data: dict) -> dict:
+    """Write a Grid-delivered proposal into the owner's inbox. Never runs or starts anything.
+
+    Only nodes whose owner set bloom-inbox accept proposals. The spec hash is recomputed from the
+    module source before writing, so a tampered or mismatched proposal never lands on disk.
+    """
+    import os
+    import tempfile
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from bloom.specs import SLUG_RE, spec_from_source
+
+    inbox = node_config.get(NODE_INBOX_KEY)
+    proposal = data.get("proposal") if isinstance(data.get("proposal"), dict) else {}
+    slug = str(proposal.get("slug") or "")
+    if not inbox:
+        return {"ok": False, "slug": slug, "error": "this node has no inbox (bloom-inbox not set)"}
+    if not SLUG_RE.match(slug):
+        return {"ok": False, "slug": slug, "error": "invalid slug"}
+    source = proposal.get("module_source")
+    if not isinstance(source, str) or len(json.dumps(proposal)) > MAX_PROPOSAL_CHARS:
+        return {"ok": False, "slug": slug, "error": "missing module source or proposal too large"}
+    try:
+        digest = spec_hash(spec_from_source(source))
+    except SyntaxError:
+        return {"ok": False, "slug": slug, "error": "module source does not parse"}
+    if digest != proposal.get("spec_sha256"):
+        return {"ok": False, "slug": slug, "error": "spec_sha256 does not match module source"}
+    folder = Path(str(inbox)).expanduser()
+    folder.mkdir(parents=True, exist_ok=True)
+    body = {**proposal, "delivered_via": "flower-grid", "from": str(data.get("from") or ""),
+            "delivered_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat()}
+    fd, tmp = tempfile.mkstemp(dir=folder, prefix=f".{slug}.", suffix=".json")
+    with os.fdopen(fd, "w") as f:
+        json.dump(body, f, indent=2)
+    target = folder / f"{slug}.json"
+    os.replace(tmp, target)
+    return {"ok": True, "slug": slug, "spec_sha256": digest, "path": str(target), "error": None}
 
 
 def handle_grid_message(agent, context, grid_msg: dict, client=None) -> Result:
@@ -129,6 +180,12 @@ def handle_grid_message(agent, context, grid_msg: dict, client=None) -> Result:
     node_config = getattr(context, "node_config", None) or {}
     # UNVERIFIED(U2) on SuperGrid for Brian's nodes; verified locally and on vverm's nodes.
     sql.configure(node_config.get(NODE_DB_KEY))  # the data owner's file, if this node has one
+    kind, data = parse_kind(grid_msg.get("payload", ""))
+    if kind == "proposal":
+        reply = receive_proposal(node_config, data)
+        print(f"[bloom] proposal {reply.get('slug')} -> {'written to inbox' if reply['ok'] else reply['error']}")
+        grid.reply(json.dumps({"bloom": 1, "kind": "delivered", **reply}))
+        return Result("proposal", "proposal", str(reply.get("slug")), reply["ok"], error=reply.get("error"))
     if is_describe(grid_msg.get("payload", "")):
         caps = capabilities(node_config)
         print(f"[bloom] describe -> specialist={caps.specialist} has_db={caps.has_db} approved={caps.approved}")
@@ -142,7 +199,13 @@ def handle_grid_message(agent, context, grid_msg: dict, client=None) -> Result:
         return result
     try:
         specialty = node_config.get(NODE_CONFIG_KEY)
-        spec, post, source = resolve_spec(step.specialist, step.spec, str(specialty) if specialty else None)
+        base, _, wanted_site = step.specialist.partition("@")  # "records-analyst@hospital-a"
+        if wanted_site and wanted_site != site_slug(node_config.get(NODE_SITE_KEY)):
+            result = Result(step.job_id, step.step_id, step.specialist, False,
+                            error=f"this node is not {wanted_site} (site {node_config.get(NODE_SITE_KEY)!r})")
+            grid.reply(result.to_payload())
+            return result
+        spec, post, source = resolve_spec(base, step.spec, str(specialty) if specialty else None)
         approved = load_approved(node_config.get(NODE_APPROVED_KEY))
         digest = spec_hash(spec)
         if approved is not None and digest not in approved:

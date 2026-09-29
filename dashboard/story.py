@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 SKILLS = {
-    "sql": ("Sales data", "🗄️"),
+    "sql": ("Patient records", "🏥"),
     "stats": ("Statistics", "📊"),
     "dates": ("Dates", "📅"),
     "units": ("Unit conversion", "📏"),
     "extraction": ("Text extraction", "🔎"),
     "writing": ("Writing", "✍️"),
+    "currency": ("Currency", "💱"),
+    "extraction": ("Text extraction", "🔎"),
 }
 JOBS = {
     "generalist": "Answers anything, but has no tools",
-    "sql": "Looks up answers in the sales database",
+    "sql": "Queries its own hospital's patient records (aggregates only)",
     "stats": "Crunches the numbers exactly",
     "dates": "Counts days without off-by-one mistakes",
     "units": "Converts units precisely",
     "extraction": "Pulls details out of messy text",
-    "writing": "Writes the summary for the CEO",
+    "writing": "Writes the note for the quality committee",
 }
 STEPS = ["Practice", "Spot a weakness", "Build an agent", "Human approval", "New agent joins", "Team task"]
 ROLE_TEXT = {
@@ -68,7 +70,11 @@ def build_story(events: list[dict], agents_by_slug: dict[str, dict]) -> dict:
         t = ev["type"]
         if t == "phase":
             name = str(ev.get("name") or "")
-            if name.startswith("round 1") or name == "bench":
+            if name == "session start":
+                step, headline = 0, "Bloom starts with one agent: the Generalist."
+                sub = "It can answer anything, but it has no tools and no access to anyone's data."
+                now = {"kind": "idle", "title": "One agent", "body": "Watch the team grow."}
+            elif name.startswith("round 1") or name == "bench":
                 step, round_name = 1, "practice"
                 headline = "The team is working through practice questions."
                 sub = "Bloom watches which kinds of questions it keeps getting wrong."
@@ -154,6 +160,17 @@ def build_story(events: list[dict], agents_by_slug: dict[str, dict]) -> dict:
             now = {"kind": "approval", "title": f"{name} is ready", "icon": icon(ev.get("category")),
                    "body": ev.get("purpose") or "", "detail": detail, "tools": len(ev.get("tools") or []),
                    "owner": True, "sha": (ev.get("spec_sha256") or "")[:12]}
+        elif t == "delivered":
+            name = display_name(ev.get("slug"))
+            who = str(ev.get("owner") or "the data owner").capitalize()
+            if ev.get("ok"):
+                step = 4
+                headline = f"{name} was delivered over the Flower Grid to {who}'s machine."
+                sub = f"Nothing runs until {who} reads the code and types y."
+                now = {**now, "kind": "approval", "owner": True,
+                       "detail": f"In {who}'s inbox via node {str(ev.get('node_name') or ev.get('node_id'))}. Waiting for y."}
+            else:
+                sub = f"Delivery failed: {ev.get('error')}"
         elif t == "approval_resolved":
             if not ev.get("approved"):
                 headline = f"The human said no, so {display_name(ev.get('slug'))} was not added."

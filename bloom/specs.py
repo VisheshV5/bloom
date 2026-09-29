@@ -77,7 +77,8 @@ def tool_catalog() -> list[dict]:
 
 
 # ── approval hashes (identical on the Forge and on the node) ──────────────────
-HASH_FIELDS = ("slug", "category", "purpose", "instructions", "model", "tools", "examples", "verify")
+HASH_FIELDS = ("slug", "category", "purpose", "instructions", "model", "tools", "examples", "verify",
+               "postprocess_source")
 
 
 def canonical_json(obj) -> str:
@@ -98,6 +99,7 @@ def spec_hash(spec: dict) -> str:
     core["tools"] = list(core["tools"] or [])
     core["examples"] = [list(e) for e in (core["examples"] or [])]
     core["verify"] = core["verify"] or ""
+    core["postprocess_source"] = (core["postprocess_source"] or "").strip()  # code that runs on the node
     return hashlib.sha256(canonical_json(core).encode()).hexdigest()
 
 
@@ -106,7 +108,9 @@ def spec_from_source(source: str) -> dict:
     import ast
 
     values = {}
-    for node in ast.parse(source).body:
+    tree = ast.parse(source)
+    post = next((n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "postprocess"), None)
+    for node in tree.body:
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             try:
                 values[node.targets[0].id] = ast.literal_eval(node.value)
@@ -115,7 +119,8 @@ def spec_from_source(source: str) -> dict:
     return {"slug": values.get("SLUG"), "category": values.get("CATEGORY"), "purpose": values.get("PURPOSE", ""),
             "instructions": values.get("INSTRUCTIONS"), "model": values.get("MODEL"),
             "tools": list(values.get("TOOLS", [])), "examples": list(values.get("EXAMPLES", [])),
-            "verify": values.get("VERIFY", "")}
+            "verify": values.get("VERIFY", ""),
+            "postprocess_source": (ast.get_source_segment(source, post) or "") if post else ""}
 
 
 def load_approved(path: str | None) -> set[str] | None:

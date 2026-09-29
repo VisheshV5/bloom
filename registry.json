@@ -59,7 +59,7 @@
         "version": 1
       },
       "module": "bloom/specialists/sql_analyst.py",
-      "status": "active",
+      "status": "retired",
       "created_at": "2026-09-29T17:45:50Z",
       "created_by": [
         "architect",
@@ -86,7 +86,9 @@
           ]
         }
       },
-      "activated_at": "2026-09-29T20:16:49Z"
+      "activated_at": "2026-09-29T20:16:49Z",
+      "retired_at": "2026-09-29T21:14:29Z",
+      "retired_reason": "replaced for the hospital scenario"
     },
     {
       "slug": "stats-analyst",
@@ -272,6 +274,96 @@
       },
       "hub": null,
       "scores": {}
+    },
+    {
+      "slug": "info-extractor",
+      "kind": "specialist",
+      "category": "extraction",
+      "purpose": "Extracts requested facts, fields, entities, quotations, and structured records from user-provided text without inventing missing information.",
+      "spec": {
+        "slug": "info-extractor",
+        "category": "extraction",
+        "purpose": "Extracts requested facts, fields, entities, quotations, and structured records from user-provided text without inventing missing information.",
+        "instructions": "You are an information-extraction specialist. Extract only what is explicitly present in the user-provided text. Follow the requested schema, field names, order, format, and scope exactly. Use regex_findall for exact pattern-based extraction or validation, including emails, URLs, dates, IDs, numbers, headings, repeated labels, and consistently formatted records; do not guess matches by inspection when the tool can check them. Preserve source spelling and wording for verbatim fields and quotations. Normalize values only when requested, and state the normalization rule. Distinguish absent, ambiguous, and conflicting values; use null or the user's specified placeholder rather than inventing content. When multiple candidates exist, return all candidates with brief source context unless instructed otherwise. Do not infer identities, relationships, intent, or facts that the text does not support. For long text, process all supplied sections and deduplicate only if requested. If the requested source, schema, or selection criterion is missing, ask one concise clarification. Return valid JSON, CSV, a table, or a list as requested; otherwise use a compact labeled structure. End every reply with a line `FINAL: <answer>`.",
+        "verify": "Re-scan the source using regex_findall for each pattern-based field, then compare match counts and values with the output. Check every extracted value against its exact source span, confirm required fields are present, and ensure absent values were not inferred.",
+        "model": "openai/gpt-6-luna",
+        "tools": [
+          "regex_findall"
+        ],
+        "capabilities": [
+          "Extract named fields and entities from supplied text",
+          "Capture exact quotations and source wording",
+          "Parse repeated records into JSON, CSV, tables, or lists",
+          "Find and validate patterned values with regular expressions",
+          "Flag missing, ambiguous, duplicate, or conflicting values",
+          "Apply requested normalization without unsupported inference"
+        ],
+        "output_format": "Return the requested structured extraction, followed by a final line in the form `FINAL: <answer>`.",
+        "version": 1
+      },
+      "module": "bloom/specialists/info_extractor.py",
+      "status": "active",
+      "created_at": "2026-09-29T20:28:38Z",
+      "created_by": [
+        "architect",
+        "builder",
+        "reviewer"
+      ],
+      "approved_by": "node-owner:brianhuang08",
+      "node": {
+        "mode": "node",
+        "node_id": "7792779149242055116",
+        "name": "info-extractor@brianhuang08"
+      },
+      "hub": null,
+      "scores": {},
+      "spec_sha256": "329587ec5c2511600d7f56cd8ab3daa17003d5c070354205e5194190a6393958",
+      "activated_at": "2026-09-29T20:30:50Z"
+    },
+    {
+      "slug": "currency-calculator",
+      "kind": "specialist",
+      "category": "currency",
+      "purpose": "Calculates currency conversions and monetary totals using user-supplied exchange rates, fees, taxes, discounts, and rounding rules.",
+      "spec": {
+        "slug": "currency-calculator",
+        "category": "currency",
+        "purpose": "Calculates currency conversions and monetary totals using user-supplied exchange rates, fees, taxes, discounts, and rounding rules.",
+        "instructions": "You are the currency-calculation specialist. Use calculate for every arithmetic result; never perform monetary arithmetic mentally or guess an exchange rate. You have no live or historical FX-rate source. For cross-currency conversions, require the user to provide the rate and its direction (for example, 1 USD = 0.92 EUR); if absent or ambiguous, ask for it. Clearly identify source currency, target currency, amount, rate, fixed fees, percentage fees, taxes, discounts, and the order in which they apply. Do not combine amounts denominated in different currencies until they are converted to one currency. Preserve full precision in intermediate calculations and round only the final amount according to the user's rule; otherwise use the currency's stated minor-unit precision, typically two decimal places, and disclose that assumption. For reverse rates, derive the reciprocal with calculate. For splits and allocations, report any rounding remainder and assign it only as instructed. Distinguish percentage change from percentage-point change and markup from margin. State assumptions briefly and do not present calculations as financial advice. If required inputs are missing, request them rather than inventing values. End every reply with a line `FINAL: <answer>`.",
+        "verify": "Recompute the full amount with calculate from the stated inputs. For FX conversions, reverse-convert the unrounded result using the reciprocal rate and confirm the original amount; separately check fees, taxes, discounts, rounding, and any allocation remainder.",
+        "model": "openai/gpt-5.6-sol",
+        "tools": [
+          "calculate"
+        ],
+        "capabilities": [
+          "Convert currencies using user-supplied exchange rates",
+          "Calculate taxes, discounts, tips, markups, margins, and transaction fees",
+          "Handle direct and reciprocal exchange-rate quotations",
+          "Split and allocate monetary amounts with rounding reconciliation",
+          "Compare monetary scenarios and percentage changes",
+          "Apply explicit currency rounding and minor-unit rules"
+        ],
+        "output_format": "Concise calculation with currencies, rate and assumptions stated, ending with `FINAL: <answer>`.",
+        "version": 1
+      },
+      "module": "bloom/specialists/currency_calculator.py",
+      "status": "active",
+      "created_at": "2026-09-29T20:41:48Z",
+      "created_by": [
+        "architect",
+        "builder",
+        "reviewer"
+      ],
+      "approved_by": "node-owner:brianhuang08",
+      "node": {
+        "mode": "node",
+        "node_id": "6016546827336689898",
+        "name": "currency-calculator@brianhuang08"
+      },
+      "hub": null,
+      "scores": {},
+      "spec_sha256": "01ffcd11b335330f12869a1c6b25e57602b06adc6764b27e2c165fb938966519",
+      "activated_at": "2026-09-29T20:52:54Z"
     }
   ],
   "forge_log": [
@@ -328,6 +420,28 @@
       },
       "outcome": "approved",
       "slug": "writing-editor",
+      "attempts": 1
+    },
+    {
+      "ts": "2026-09-29T20:28:38Z",
+      "gap": {
+        "kind": "manual",
+        "category": "extraction",
+        "failures": []
+      },
+      "outcome": "proposed",
+      "slug": "info-extractor",
+      "attempts": 1
+    },
+    {
+      "ts": "2026-09-29T20:41:48Z",
+      "gap": {
+        "kind": "manual",
+        "category": "currency",
+        "failures": []
+      },
+      "outcome": "proposed",
+      "slug": "currency-calculator",
       "attempts": 1
     }
   ]

@@ -43,7 +43,7 @@ _NUM = {"type": "number"}
 
 _TOOLS = [
     Tool("run_sql", "Run one read-only, aggregating SQLite SELECT (GROUP BY or SUM/COUNT/AVG/MIN/MAX; no SELECT *; "
-         "max 200 rows) on the sales database attached to this machine. " + SCHEMA_DESCRIPTION,
+         "no ids except inside COUNT; max 200 rows) on the hospital database attached to this machine. " + SCHEMA_DESCRIPTION,
          _obj({"query": _STR}, ["query"]), lambda query: sql.run_sql(query)),
     Tool("describe", "Summary statistics (n, mean, median, sample stdev, min, max, sum) of a list of numbers.",
          _obj({"values": _NUMS}, ["values"]), stats.describe),

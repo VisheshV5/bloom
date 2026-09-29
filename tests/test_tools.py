@@ -8,8 +8,8 @@ from bloom.tools import call_tool, dates, sql, stats, units
 def test_sql_is_read_only(coffee_db):
     assert "error" in json.loads(call_tool("run_sql", {"query": "DELETE FROM sales"}))
     assert "error" in json.loads(call_tool("run_sql", {"query": "SELECT 1; DROP TABLE sales"}))
-    out = json.loads(call_tool("run_sql", {"query": "SELECT COUNT(*) FROM stores"}))
-    assert out["result"]["rows"] == [[4]]
+    out = json.loads(call_tool("run_sql", {"query": "SELECT COUNT(*) FROM patients"}))
+    assert out["result"]["rows"] == [[1645]]
 
 
 def test_welch_matches_reference_values():
@@ -48,12 +48,15 @@ def test_sql_tool_absent_without_attached_db():
 
     sql.configure(None)
     assert [t["name"] for t in tool_schemas(["run_sql", "calculate"])] == ["calculate"]
-    assert "not available" in json.loads(call_tool("run_sql", {"query": "SELECT COUNT(*) FROM stores"}))["error"]
+    assert "not available" in json.loads(call_tool("run_sql", {"query": "SELECT COUNT(*) FROM patients"}))["error"]
 
 
 def test_sql_refuses_row_level_queries(coffee_db):
-    for q in ["SELECT * FROM sales", "SELECT s.* FROM stores s", "SELECT id, qty FROM sales",
-              "SELECT a.id, * FROM sales a", "SELECT 1; DROP TABLE sales"]:
+    for q in ["SELECT * FROM admissions", "SELECT a.* FROM admissions a", "SELECT ward, age FROM patients",
+              "SELECT 1; DROP TABLE admissions", "SELECT patient_id, COUNT(*) FROM admissions GROUP BY patient_id",
+              "SELECT patient_id, MAX(age) FROM patients", "SELECT ward, a.admission_id, COUNT(*) FROM admissions a GROUP BY ward"]:
         assert "error" in json.loads(call_tool("run_sql", {"query": q})), q
-    ok = json.loads(call_tool("run_sql", {"query": "SELECT date, SUM(qty) FROM sales GROUP BY date"}))["result"]
+    ok = json.loads(call_tool("run_sql", {"query": "SELECT admit_date, COUNT(*) FROM admissions GROUP BY admit_date"}))["result"]
     assert ok["row_count"] == 181 and not ok["truncated"]
+    n = json.loads(call_tool("run_sql", {"query": "SELECT COUNT(DISTINCT patient_id) FROM admissions"}))["result"]
+    assert n["rows"] == [[1645]]

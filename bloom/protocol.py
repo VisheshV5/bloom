@@ -134,6 +134,8 @@ class Capabilities:
     node_name: str | None = None
     approved: bool = True  # False: this node would refuse to run its specialist
     spec_sha256: str | None = None
+    inbox: bool = False  # the owner opted this node in to receive proposals over the Grid
+    site: str | None = None  # e.g. "Hospital A": whose private data this node holds
 
     def to_payload(self) -> str:
         return json.dumps({"bloom": VERSION, "kind": "capabilities", **asdict(self)})
@@ -144,3 +146,19 @@ class Capabilities:
         if not isinstance(data, dict) or data.get("kind") != "capabilities":
             raise ValueError("Not a Bloom capabilities payload")
         return cls(**{k: data.get(k) for k in cls.__dataclass_fields__ if k in data})
+
+
+# ── proposal delivery (Forge -> node owner's inbox, over the Grid) ─────────────
+MAX_PROPOSAL_CHARS = 200_000
+
+
+def proposal_payload(proposal: dict, sender: str) -> str:
+    return json.dumps({"bloom": VERSION, "kind": "proposal", "from": sender, "proposal": proposal})
+
+
+def parse_kind(payload: str) -> tuple[str | None, dict]:
+    try:
+        data = json.loads(payload)
+    except (TypeError, ValueError):
+        return None, {}
+    return (data.get("kind"), data) if isinstance(data, dict) else (None, {})

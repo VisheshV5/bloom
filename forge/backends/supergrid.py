@@ -107,6 +107,13 @@ class SuperGridBackend:
         result["ms"] = int((time.monotonic() - started) * 1000)
         return result
 
+    def deliver(self, proposal: dict, owner: str | None, sender: str = "vverm") -> dict:
+        """Send a proposal over the Grid to the owner's inbox node (a short coordinator run)."""
+        job = {"task": f"deliver {proposal.get('slug')}", "mode": "deliver", "proposal": proposal,
+               "owner": owner, "sender": sender, "job_id": f"deliver-{proposal.get('slug')}"}
+        res = self._run("orchestrate", job, [])
+        return res.get("delivered") or {"ok": False, "error": res.get("error") or "no delivery result"}
+
     def describe(self, registry: list[dict]) -> dict:
         """Discovery-only run: every node answers describe. Doubles as warm-up for fresh nodes."""
         res = self._run("orchestrate", {"task": "describe", "mode": "describe", "job_id": "describe"}, registry)

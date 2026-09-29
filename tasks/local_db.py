@@ -1,7 +1,7 @@
-"""Full-access, in-memory copy of the dataset for computing benchmark answers locally.
+"""Full-access, in-memory copies of each hospital's records for computing benchmark answers locally.
 
-This is the benchmark author's view (unrestricted SQL). Agents never use it: they only get
-the read-only, aggregate-only run_sql tool on a node that has the database attached.
+This is the benchmark author's view (unrestricted SQL). Agents never use it: they only get the
+read-only, aggregate-only run_sql tool on a node that has its own hospital's file attached.
 """
 
 from __future__ import annotations
@@ -10,42 +10,37 @@ import sqlite3
 import threading
 from pathlib import Path
 
-from tasks import coffee_data
+from tasks import hospital_data
 
-_conn: sqlite3.Connection | None = None
+DEFAULT_SITE = "hospital-a"
+_conns: dict[str, sqlite3.Connection] = {}
 _lock = threading.RLock()
 
-DDL = (
-    "CREATE TABLE stores(id INTEGER PRIMARY KEY, name TEXT, city TEXT, opened TEXT);"
-    "CREATE TABLE products(id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL);"
-    "CREATE TABLE sales(id INTEGER PRIMARY KEY, store_id INTEGER, product_id INTEGER, date TEXT, qty INTEGER);"
-)
 
-
-def _fill(conn: sqlite3.Connection) -> None:
-    conn.executescript(DDL)
-    conn.executemany("INSERT INTO stores VALUES (?,?,?,?)", coffee_data.STORES)
-    conn.executemany("INSERT INTO products VALUES (?,?,?,?)", coffee_data.PRODUCTS)
-    conn.executemany("INSERT INTO sales VALUES (?,?,?,?,?)", coffee_data.SALES)
+def _fill(conn: sqlite3.Connection, site: str) -> None:
+    data = hospital_data.generate(site)
+    conn.executescript(hospital_data.DDL)
+    conn.executemany("INSERT INTO patients VALUES (?,?,?)", data["patients"])
+    conn.executemany("INSERT INTO admissions VALUES (?,?,?,?,?,?,?,?,?)", data["admissions"])
     conn.commit()
 
 
-def query(sql: str) -> tuple[list[str], list[tuple]]:
-    global _conn
+def query(sql: str, site: str = DEFAULT_SITE) -> tuple[list[str], list[tuple]]:
     with _lock:
-        if _conn is None:
-            _conn = sqlite3.connect(":memory:", check_same_thread=False)
-            _fill(_conn)
-        cur = _conn.execute(sql)
+        if site not in _conns:
+            conn = sqlite3.connect(":memory:", check_same_thread=False)
+            _fill(conn, site)
+            _conns[site] = conn
+        cur = _conns[site].execute(sql)
         return [d[0] for d in cur.description or []], cur.fetchall()
 
 
-def export(path: Path) -> Path:
+def export(path: Path, site: str = DEFAULT_SITE) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         path.unlink()  # regenerate: same seed, identical contents
     conn = sqlite3.connect(path)
-    _fill(conn)
+    _fill(conn, site)
     conn.close()
     return path

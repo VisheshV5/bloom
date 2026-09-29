@@ -1,107 +1,95 @@
-"""The finale: a multi-part task that needs several specialists passing work along.
+"""The finale: a question that needs TWO hospitals' private records, answered with aggregates only.
 
-Option A ("Data detective") is implemented. The dataset plants a ~12% lift at the
-Palo Alto store from 2026-04-01, so the right answer is knowable and checkable.
+Hospital A's records live only on Brian's node, Hospital B's only on Vishesh's. Each hospital's
+records-analyst returns counts and rates; a stats specialist pools them; a writer explains it.
+The reference answer below is computed locally from the same seeded data, so the finale is checkable.
 """
 
 from __future__ import annotations
 
-from bloom.tools import dates, stats
-from tasks import local_db as sql
+import math
+import re
 
-LAUNCH = "2026-04-01"
-WINDOW = 30  # business days on each side
+from tasks.hospital_data import PROTOCOL_START, SITES
+from tasks.local_db import query
 
 PROMPT = (
-    "Did the loyalty program launched on 2026-04-01 increase average daily revenue at the "
-    "Palo Alto store? Compare the 30 business days before the launch with the first 30 "
-    "business days from the launch (business days are Mon-Fri, no holidays), test whether "
-    "the difference is statistically significant (Welch t-test, alpha 0.05), and write a "
-    "3-sentence note for the CEO."
+    "Did the new discharge protocol (used for admissions from 2026-03-01) reduce 30-day readmissions? "
+    "Use BOTH Hospital A's and Hospital B's records: get each hospital's number of admissions and "
+    "readmissions under the old and new protocol (aggregates only; patient-level data never leaves a "
+    "hospital), then compute the pooled readmission rate before and after, the change in percentage "
+    "points, and a two-sided two-proportion z-test (alpha 0.05). Write a 3-sentence note for the "
+    "hospitals' joint quality committee."
 )
 
-# The plan a good orchestrator should produce (used by the mock backend and shown in the README).
 PLAN = [
-    {"step_id": "s1", "specialist": "date-wrangler", "depends_on": [],
-     "instruction": "List the 30 business days before 2026-04-01 and the first 30 business days "
-                    "starting 2026-04-01. Give each window's first and last date."},
-    {"step_id": "s2", "specialist": "sql-analyst", "depends_on": ["s1"],
-     "instruction": "For the Palo Alto store, compute daily revenue (sum of qty*price) for every "
-                    "date in both windows. Return two lists of numbers: before and after."},
-    {"step_id": "s3", "specialist": "stats-analyst", "depends_on": ["s2"],
-     "instruction": "Compare the before and after daily revenue lists: both means, percent change, "
-                    "and a two-sided Welch t-test p-value. Is it significant at 0.05?"},
-    {"step_id": "s4", "specialist": "report-writer", "depends_on": ["s1", "s2", "s3"],
-     "instruction": "Write a 3-sentence note for the CEO with the key numbers and a recommendation."},
+    {"step_id": "s1", "specialist": "records-analyst@hospital-a", "depends_on": [],
+     "instruction": "At Hospital A, count admissions and 30-day readmissions under the old and the new discharge protocol."},
+    {"step_id": "s2", "specialist": "records-analyst@hospital-b", "depends_on": [],
+     "instruction": "At Hospital B, count admissions and 30-day readmissions under the old and the new discharge protocol."},
+    {"step_id": "s3", "specialist": "stats-analyst", "depends_on": ["s1", "s2"],
+     "instruction": "Pool both hospitals' counts: readmission rate old vs new, change in percentage points, "
+                    "and a two-sided two-proportion z-test p-value."},
+    {"step_id": "s4", "specialist": "writing-editor", "depends_on": ["s1", "s2", "s3"],
+     "instruction": "Write a 3-sentence note for the joint quality committee with the key numbers and a recommendation."},
 ]
 REQUIRED = [s["specialist"] for s in PLAN]
-MISSING_CAPABILITY = {
-    "capability": "report-writer",
-    "category": "writing",
-    "why": "The task needs a polished executive summary; no specialist writes reports.",
-}
+MISSING_CAPABILITY = {"capability": "report-writer", "category": "writing",
+                      "why": "The task needs a polished committee note; no specialist writes reports."}
 
 
-def windows() -> tuple[list[str], list[str]]:
-    before_start = dates.add_business_days(LAUNCH, -WINDOW)
-    before = dates.business_days_in_range(before_start, dates.add_days(LAUNCH, -1))
-    after_end = dates.add_business_days(LAUNCH, WINDOW - 1)
-    after = dates.business_days_in_range(LAUNCH, after_end)
-    return before, after
+def site_counts(site: str) -> dict:
+    rows = {proto: (n, r) for proto, n, r in query(
+        "SELECT protocol, COUNT(*), SUM(readmitted_30d) FROM admissions GROUP BY protocol", site)[1]}
+    return {"old_n": rows["old"][0], "old_readmits": rows["old"][1], "new_n": rows["new"][0], "new_readmits": rows["new"][1]}
 
 
-def daily_revenue(days: list[str]) -> list[float]:
-    placeholders = ",".join(f"'{d}'" for d in days)
-    _, rows = sql.query(
-        "SELECT date, SUM(qty*price) FROM sales JOIN stores s ON s.id = sales.store_id "
-        "JOIN products p ON p.id = sales.product_id "
-        f"WHERE s.city = 'Palo Alto' AND date IN ({placeholders}) GROUP BY date ORDER BY date"
-    )
-    return [round(r[1], 2) for r in rows]
+def two_proportion_z(x1: int, n1: int, x2: int, n2: int) -> tuple[float, float]:
+    p1, p2, pool = x1 / n1, x2 / n2, (x1 + x2) / (n1 + n2)
+    z = (p1 - p2) / math.sqrt(pool * (1 - pool) * (1 / n1 + 1 / n2))
+    return z, math.erfc(abs(z) / math.sqrt(2))
 
 
 def reference() -> dict:
-    before, after = windows()
-    rb, ra = daily_revenue(before), daily_revenue(after)
-    t = stats.ttest_welch(ra, rb)
-    mean_b, mean_a = t["mean_b"], t["mean_a"]
+    per = {SITES[s]["name"]: site_counts(s) for s in SITES}
+    old_n = sum(c["old_n"] for c in per.values())
+    old_r = sum(c["old_readmits"] for c in per.values())
+    new_n = sum(c["new_n"] for c in per.values())
+    new_r = sum(c["new_readmits"] for c in per.values())
+    z, p = two_proportion_z(old_r, old_n, new_r, new_n)
     return {
-        "before_window": [before[0], before[-1]],
-        "after_window": [after[0], after[-1]],
-        "mean_before": round(mean_b, 2),
-        "mean_after": round(mean_a, 2),
-        "pct_change": round(100 * (mean_a - mean_b) / mean_b, 1),
-        "p_value": round(t["p_value"], 4),
-        "significant": t["p_value"] < 0.05,
-        "before_series": rb,
-        "after_series": ra,
+        "per_hospital": per,
+        "protocol_start": PROTOCOL_START.isoformat(),
+        "rate_old": round(100 * old_r / old_n, 2),
+        "rate_new": round(100 * new_r / new_n, 2),
+        "change_pts": round(100 * (new_r / new_n - old_r / old_n), 2),
+        "z": round(z, 3),
+        "p_value": p,
+        "significant": p < 0.05,
     }
 
 
-def ceo_note(ref: dict) -> str:
-    p_text = "p < 0.0001" if ref["p_value"] < 0.0001 else f"p = {ref['p_value']:.4f}"
+def committee_note(ref: dict) -> str:
+    p_text = "p < 0.001" if ref["p_value"] < 0.001 else f"p = {ref['p_value']:.3f}"
     verdict = "a statistically significant" if ref["significant"] else "no statistically significant"
     return (
-        f"Palo Alto's average daily revenue rose from ${ref['mean_before']:,.2f} to "
-        f"${ref['mean_after']:,.2f} ({ref['pct_change']:+.1f}%) in the 30 business days after the "
-        f"loyalty program launched on 2026-04-01. A Welch t-test gives {p_text}, "
-        f"which is {verdict} lift at the 5% level. Recommendation: "
-        + ("roll the program out to the other three stores and keep tracking weekly revenue."
-           if ref["significant"] else "keep the pilot running longer before expanding it.")
+        f"Across both hospitals, the 30-day readmission rate fell from {ref['rate_old']:.2f}% under the old discharge "
+        f"protocol to {ref['rate_new']:.2f}% under the new one ({ref['change_pts']:+.2f} percentage points). "
+        f"A two-proportion z-test gives z = {ref['z']:.2f}, {p_text}, {verdict} reduction at the 5% level. "
+        "Recommendation: keep the new protocol at both hospitals and review readmissions by ward each month."
     )
 
 
 def check(result_answer: str | None, ref: dict | None = None) -> bool:
-    """The finale passes if the answer mentions both means (1% tolerance) and the right verdict."""
-    import re
-
+    """Passes if the answer states both pooled rates (±0.3 points) and the right significance verdict."""
     if not result_answer:
         return False
     ref = ref or reference()
-    nums = [float(x.replace(",", "")) for x in re.findall(r"\d[\d,]*\.\d+|\d[\d,]{3,}", result_answer)]
-    has = lambda target: any(abs(n - target) <= 0.01 * target for n in nums)  # noqa: E731
-    says_sig = "not statistically significant" not in result_answer.lower() and "no statistically" not in result_answer.lower()
-    return has(ref["mean_before"]) and has(ref["mean_after"]) and says_sig == ref["significant"]
+    nums = [float(x) for x in re.findall(r"\d+\.\d+", result_answer)]
+    has = lambda target: any(abs(n - target) <= 0.3 for n in nums)  # noqa: E731
+    text = result_answer.lower()
+    says_sig = not ("not statistically significant" in text or "no statistically" in text)
+    return has(ref["rate_old"]) and has(ref["rate_new"]) and says_sig == ref["significant"]
 
 
-TASK = {"id": "final-a", "category": "final", "prompt": PROMPT, "mode": "plan"}
+TASK = {"id": "final-hospitals", "category": "final", "prompt": PROMPT, "mode": "plan"}

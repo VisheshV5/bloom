@@ -44,7 +44,6 @@ def test_scorer_kinds():
 
 def test_final_task_reference_and_check():
     ref = final_task.reference()
-    assert ref["significant"] and ref["pct_change"] > 5
-    assert len(ref["before_series"]) == len(ref["after_series"]) == 30
-    assert final_task.check(final_task.ceo_note(ref), ref)
-    assert not final_task.check("Revenue went up a lot.", ref)
+    assert ref["significant"] and ref["change_pts"] < -3 and set(ref["per_hospital"]) == {"Hospital A", "Hospital B"}
+    assert final_task.check(final_task.committee_note(ref), ref)
+    assert not final_task.check("Readmissions went down a lot.", ref)

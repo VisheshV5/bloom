@@ -41,6 +41,8 @@ def _common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--publish-standalone", action="store_true", help="offer to publish each specialist (asks)")
     p.add_argument("--dry-run", action="store_true", help="print SuperGrid/node commands instead of running")
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--deliver-to", default=None,
+                   help="deliver node-hosted proposals over the Grid to this owner's inbox node (<slug>@OWNER)")
 
 
 def build_stack(args):
@@ -59,7 +61,8 @@ def build_stack(args):
 
     benchmark = [t for t in load_benchmark() if t.get("split", "dev") == "dev"]  # test split is held out
     forge = Forge(backend, registry, bus, approver, nodes, benchmark,
-                  run_build=not args.no_build, publish_standalone=args.publish_standalone)
+                  run_build=not args.no_build, publish_standalone=args.publish_standalone,
+                  deliver_to=getattr(args, "deliver_to", None))
     return bus, registry, backend, forge, benchmark
 
 
@@ -161,6 +164,38 @@ def cmd_describe(args) -> None:
     print(json.dumps({k: res.get(k) for k in ("answer", "discovery_ms", "discovered", "error")}, indent=2, default=str))
 
 
+def cmd_deliver(args) -> None:
+    bus, registry, backend, forge, benchmark = build_stack(args)
+    if not args.deliver_to:
+        sys.exit("--deliver-to OWNER is required (the part after @ in their node names, e.g. brian)")
+    from forge.paths import PROPOSALS
+
+    proposal = json.loads((PROPOSALS / f"{args.slug}.json").read_text())
+    print(json.dumps(forge.deliver_proposal(proposal), indent=2, default=str))
+
+
+def cmd_session(_args) -> None:
+    EventBus(echo=False).emit("phase", name="session start")
+    print("Dashboard reset to the Generalist (nothing else changed: agents and nodes keep running).")
+
+
+def cmd_replay(args) -> None:
+    from forge.replay import replay
+
+    bus = EventBus(echo=not args.quiet)
+    done = replay(bus, Registry(), seconds_per_agent=args.seconds, exclude=args.exclude or ())
+    print("Replayed:", ", ".join(done))
+
+
+def cmd_approve(args) -> None:
+    from forge.owner import approve
+
+    approver = TerminalApprover(auto=False)  # a node owner's approval is never automatic
+    out = approve(args.slug, args.db, args.site, args.name, args.federation, approver.confirm,
+                  start=not args.no_start, bus=EventBus(echo=False))
+    print(json.dumps({k: v for k, v in out.items() if k != "settings"}, indent=2, default=str))
+
+
 def cmd_proposals(_args) -> None:
     from forge.activation import pending
 
@@ -181,7 +216,7 @@ def cmd_activate(args) -> None:
 
     out = activate(registry, args.slug, node_id=args.node_id, bus=bus,
                    backend=None if args.no_warm or args.backend != "supergrid" else backend, timeout=args.timeout,
-                   lister=lambda: list_nodes(args.federation))
+                   lister=lambda: list_nodes(args.federation), owner=args.owner)
     print(json.dumps({k: v for k, v in out.items() if k != "warm_up"}, indent=2))
     if out.get("warm_up"):
         print("warm-up:", out["warm_up"].get("answer"))
@@ -193,6 +228,10 @@ def cmd_registry(args) -> None:
         for a in registry.agents:
             scores = {c: f"{s['correct']}/{s['attempts']}" for c, s in a["scores"].items()}
             print(f"{a['slug']:16} {a['kind']:11} {a['status']:7} node={a['node'].get('mode')} scores={scores}")
+    elif args.action == "retire":
+        for slug in args.slugs:
+            registry.retire(slug, "replaced for the hospital scenario")
+            print(f"retired {slug}")
     elif args.action == "reset":
         if input("Reset registry to generalist-only? Current state is backed up to runs/backup/. [y/N] ").strip() in {"y", "Y"}:
             fresh_start(registry)
@@ -246,19 +285,29 @@ def main(argv=None) -> None:
     p.add_argument("--model", default=None, help="one model for all arms (default: generalist's)")
     p.add_argument("--ablation", action="store_true",
                    help="add a 4th arm: generalist+tools with a generic self-check")
-    p = sub.add_parser("registry"); p.add_argument("action", choices=["show", "reset"])
+    p = sub.add_parser("registry"); p.add_argument("action", choices=["show", "reset", "retire"])
+    p.add_argument("slugs", nargs="*")
     p = sub.add_parser("nodes"); p.add_argument("action", choices=["list", "start", "stop"])
     p.add_argument("slugs", nargs="*", help="for start: registered specialists, e.g. sql-analyst stats-analyst")
     sub.add_parser("scan")
     p = sub.add_parser("describe"); _common(p)
     sub.add_parser("proposals")
+    p = sub.add_parser("session"); p.add_argument("action", choices=["start"])
+    p = sub.add_parser("replay"); p.add_argument("--seconds", type=float, default=8.0)
+    p.add_argument("--exclude", nargs="*"); p.add_argument("--quiet", action="store_true")
+    p = sub.add_parser("deliver"); _common(p); p.add_argument("slug")
+    p = sub.add_parser("approve"); p.add_argument("slug"); p.add_argument("--db"); p.add_argument("--site")
+    p.add_argument("--name"); p.add_argument("--federation"); p.add_argument("--no-start", action="store_true")
     p = sub.add_parser("activate"); _common(p); p.add_argument("slug")
     p.add_argument("--node-id", default=None); p.add_argument("--no-warm", action="store_true")
+    p.add_argument("--owner", default=None, help="detect the owner's new online node (e.g. brianhuang08)")
     p.add_argument("--timeout", type=float, default=600)
     args = parser.parse_args(argv)
     RUNS.mkdir(exist_ok=True)
     {"demo": cmd_demo, "bench": cmd_bench, "grow": cmd_grow, "final": cmd_final, "eval": cmd_eval,
-     "describe": cmd_describe, "proposals": cmd_proposals, "activate": cmd_activate,
+     "session": cmd_session, "replay": cmd_replay,
+     "describe": cmd_describe, "proposals": cmd_proposals, "activate": cmd_activate, "deliver": cmd_deliver,
+     "approve": cmd_approve,
      "registry": cmd_registry, "nodes": cmd_nodes, "scan": cmd_scan}[args.cmd](args)
 
 

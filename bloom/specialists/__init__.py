@@ -17,6 +17,16 @@ def default_postprocess(text: str) -> str | None:
     return matches[-1].strip().strip("`*").strip() if matches else None
 
 
+def _post_source(mod: ModuleType) -> str:
+    import inspect
+
+    fn = getattr(mod, "postprocess", None)
+    try:
+        return inspect.getsource(fn) if fn else ""
+    except (OSError, TypeError):
+        return ""
+
+
 def load_specialist(slug: str) -> ModuleType | None:
     importlib.invalidate_caches()
     try:
@@ -39,4 +49,5 @@ def spec_from_module(mod: ModuleType) -> dict:
         "tools": list(mod.TOOLS),
         "examples": list(getattr(mod, "EXAMPLES", [])),
         "verify": getattr(mod, "VERIFY", ""),
+        "postprocess_source": _post_source(mod),
     }

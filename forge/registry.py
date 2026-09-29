@@ -137,6 +137,12 @@ class Registry:
         self.save()
         return agent
 
+    def retire(self, slug: str, reason: str = "") -> None:
+        """Take an agent out of service (kept in the registry for history; never routed to)."""
+        agent = self.get(slug)
+        agent.update(status="retired", retired_at=now_iso(), retired_reason=reason)
+        self.save()
+
     def proposed(self) -> list[dict]:
         return [a for a in self.agents if a["status"] == "proposed"]
 

@@ -12,11 +12,9 @@ import re
 
 from bloom.tools import dates, stats, units
 from tasks import local_db as sql
-from tasks.build_benchmark import (
-    BD, CITIES, MONTHS, PRODUCT_CATS, PRODUCTS, REVENUE_JOIN, SCHEMA_DESCRIPTION, _mk, _nums, _rand_date,
-)
+from tasks.build_benchmark import BD, DIAGNOSES, MONTHS, SCHEMA_DESCRIPTION, WARDS, _mk, _nums, _rand_date
 
-P_SQL = f"You have access to Bloom Coffee Co. sales data. {SCHEMA_DESCRIPTION} "
+P_SQL = f"You have access to Hospital A's patient records. {SCHEMA_DESCRIPTION} "
 MONTH_NAMES = list(calendar.month_name)
 
 
@@ -24,79 +22,67 @@ def _rows(q: str):
     return sql.query(q)[1]
 
 
-def _daily(city: str, ym: str) -> list[tuple[str, float]]:
-    return _rows(f"SELECT date, SUM(qty*price) {REVENUE_JOIN} WHERE s.city='{city}' AND date LIKE '{ym}%' "
-                 "GROUP BY date ORDER BY date")
+def _daily_admissions(ym: str) -> list[tuple[str, int]]:
+    return _rows(f"SELECT admit_date, COUNT(*) FROM admissions WHERE admit_date LIKE '{ym}%' GROUP BY admit_date ORDER BY admit_date")
 
 
 # ── SQL ────────────────────────────────────────────────────────────────────
 def sql_hard():
-    def pct_growth(rng):
-        q = (f"SELECT s.name, SUM(CASE WHEN date < '2026-04-01' THEN qty*price END) AS q1, "
-             f"SUM(CASE WHEN date >= '2026-04-01' THEN qty*price END) AS q2 {REVENUE_JOIN} GROUP BY s.name")
+    def largest_drop(rng):
+        q = ("SELECT ward, AVG(CASE WHEN protocol='old' THEN readmitted_30d END) AS old_rate, "
+             "AVG(CASE WHEN protocol='new' THEN readmitted_30d END) AS new_rate FROM admissions GROUP BY ward")
         rows = _rows(q)
-        best = max(rows, key=lambda r: (r[2] - r[1]) / r[1])
-        cat = rng.choice(["", ""])  # keep rng stream stable across edits
-        return _mk("sql", P_SQL + "Which store had the largest percentage increase in total revenue from Q1 2026 "
-                   "(Jan-Mar) to Q2 2026 (Apr-Jun)? Answer with the store name." + cat, best[0], "exact",
-                   how=f'run_sql(query="{q}") -> per-store Q1/Q2 revenue; compute (q2-q1)/q1 for each -> {best[0]} '
-                       f'({100 * (best[2] - best[1]) / best[1]:.2f}%)')
+        best = max(rows, key=lambda r: r[1] - r[2])
+        rng.random()  # keep the rng stream stable
+        return _mk("sql", P_SQL + "Which ward had the largest drop (in percentage points) in 30-day readmission rate "
+                   "from the old to the new discharge protocol? Answer with the ward name.", best[0], "exact",
+                   how=f'run_sql(query="{q}") -> per-ward old/new rates; largest old-new difference -> {best[0]} '
+                       f"({100 * (best[1] - best[2]):.2f} pts)")
 
-    def days_above_avg(rng):
+    def busy_days(rng):
         m = rng.randint(1, 6)
-        city = rng.choice(CITIES)
-        daily = _daily(city, f"2026-{m:02d}")
-        avg = sum(v for _, v in daily) / len(daily)
-        n = sum(1 for _, v in daily if v > avg)
-        return _mk("sql", P_SQL + f"On how many days in {MONTHS[m]} 2026 did the {city} store's daily revenue exceed "
-                   f"its own average daily revenue for that month?", n, "number", {"abs": 0},
-                   how=f"run_sql(daily revenue per date for {city} in {MONTHS[m]}) -> {len(daily)} days, mean "
-                       f"{avg:.2f}; count days above the mean -> {n}")
+        daily = _daily_admissions(f"2026-{m:02d}")
+        avg = sum(n for _, n in daily) / len(daily)
+        k = sum(1 for _, n in daily if n > avg)
+        return _mk("sql", P_SQL + f"On how many days in {MONTHS[m]} 2026 did admissions exceed that month's average "
+                   "admissions per day (counting only days with at least one admission)?", k, "number", {"abs": 0},
+                   how=f"run_sql(admissions per admit_date in {MONTHS[m]}) -> {len(daily)} days, mean {avg:.3f}; "
+                       f"count days above -> {k}")
 
-    def category_share(rng):
+    def older_effect(rng):
+        age = rng.choice([65, 70])
+        q = (f"SELECT a.protocol, AVG(a.readmitted_30d) FROM admissions a JOIN patients p ON p.patient_id = a.patient_id "
+             f"WHERE p.age >= {age} GROUP BY a.protocol")
+        rates = dict(_rows(q))
+        ans = round(100 * (rates["new"] - rates["old"]), 2)
+        return _mk("sql", P_SQL + f"For patients aged {age} or older, what is the new-protocol 30-day readmission rate "
+                   "minus the old-protocol rate, in percentage points? Round to 2 decimals.", ans, "number", {"abs": 0.02},
+                   how=f'run_sql(query="{q}") -> old {rates["old"]:.5f}, new {rates["new"]:.5f}; 100*(new-old) -> {ans}')
+
+    def los_readmitted(rng):
+        q = ("SELECT diagnosis FROM admissions WHERE readmitted_30d = 1 GROUP BY diagnosis "
+             "ORDER BY AVG(length_of_stay) DESC LIMIT 1")
+        ans = _rows(q)[0][0]
+        rng.random()
+        return _mk("sql", P_SQL + "Among admissions that were readmitted within 30 days, which diagnosis had the longest "
+                   "average length of stay? Answer with the diagnosis.", ans, "exact", how=f'run_sql(query="{q}") -> {ans}')
+
+    def busiest_day(rng):
         m = rng.randint(1, 6)
-        city, cat = rng.choice(CITIES), rng.choice(PRODUCT_CATS)
-        ym = f"2026-{m:02d}"
-        (part, total), = _rows(f"SELECT SUM(CASE WHEN p.category='{cat}' THEN qty*price ELSE 0 END), SUM(qty*price) "
-                               f"{REVENUE_JOIN} WHERE s.city='{city}' AND date LIKE '{ym}%'")
-        ans = round(100 * part / total, 1)
-        return _mk("sql", P_SQL + f"What percentage of the {city} store's {MONTHS[m]} 2026 revenue came from the "
-                   f"{cat} category? Round to 1 decimal.", ans, "number", {"abs": 0.1},
-                   how=f"run_sql(sum {cat} revenue and total revenue for {city}, {ym}) -> {part:.2f} / {total:.2f}; "
-                       f"calculate(100*part/total) -> {100 * part / total:.3f}; round to 1 decimal")
+        q = (f"SELECT admit_date, COUNT(*) AS n FROM admissions WHERE admit_date LIKE '2026-{m:02d}%' "
+             "GROUP BY admit_date ORDER BY n DESC, admit_date LIMIT 1")
+        d, n = _rows(q)[0]
+        return _mk("sql", P_SQL + f"Which date in {MONTHS[m]} 2026 had the most admissions (earliest date if tied)? "
+                   "Answer as YYYY-MM-DD.", d, "date", how=f'run_sql(query="{q}") -> {d} ({n} admissions)')
 
-    def weekend_gap(rng):
-        m = rng.randint(1, 6)
-        city = rng.choice(CITIES)
-        daily = _daily(city, f"2026-{m:02d}")
-        we = [v for d, v in daily if dates.weekday(d) in ("Saturday", "Sunday")]
-        wd = [v for d, v in daily if dates.weekday(d) not in ("Saturday", "Sunday")]
-        ans = round(sum(we) / len(we) - sum(wd) / len(wd), 2)
-        return _mk("sql", P_SQL + f"At the {city} store in {MONTHS[m]} 2026, what is the average weekend-day "
-                   f"(Saturday/Sunday) daily revenue minus the average weekday daily revenue? Round to 2 decimals.",
-                   ans, "number", {"abs": 0.02},
-                   how=f"run_sql(daily revenue per date, {city}, {MONTHS[m]}) -> split by weekday (strftime('%w') 0/6 = "
-                       f"weekend): weekend mean {sum(we) / len(we):.3f}, weekday mean {sum(wd) / len(wd):.3f} -> {ans}")
+    def long_stays(rng):
+        ward, days = rng.choice(WARDS), rng.choice([6, 7, 8])
+        q = (f"SELECT AVG(CASE WHEN length_of_stay >= {days} THEN 1.0 ELSE 0 END) FROM admissions WHERE ward='{ward}'")
+        ans = round(100 * _rows(q)[0][0], 1)
+        return _mk("sql", P_SQL + f"What percentage of {ward} admissions stayed {days} or more days? Round to 1 decimal.",
+                   ans, "number", {"abs": 0.1}, how=f'run_sql(query="{q}") -> {ans / 100:.4f} -> {ans}%')
 
-    def best_date(rng):
-        m = rng.randint(1, 6)
-        q = (f"SELECT date, SUM(qty*price) r {REVENUE_JOIN} WHERE date LIKE '2026-{m:02d}%' "
-             "GROUP BY date ORDER BY r DESC LIMIT 1")
-        d, r = _rows(q)[0]
-        return _mk("sql", P_SQL + f"Which date in {MONTHS[m]} 2026 had the highest total revenue across all stores? "
-                   "Answer as YYYY-MM-DD.", d, "date", how=f'run_sql(query="{q}") -> {d} (${r:,.2f})')
-
-    def unit_growth(rng):
-        city = rng.choice(CITIES)
-        rows = _rows(f"SELECT p.name, SUM(CASE WHEN date LIKE '2026-06%' THEN qty ELSE 0 END) - "
-                     f"SUM(CASE WHEN date LIKE '2026-01%' THEN qty ELSE 0 END) AS g {REVENUE_JOIN} "
-                     f"WHERE s.city='{city}' GROUP BY p.name ORDER BY g DESC")
-        return _mk("sql", P_SQL + f"Which product's monthly units sold at the {city} store grew the most (in absolute "
-                   "units) from January 2026 to June 2026? Answer with the product name.", rows[0][0], "exact",
-                   how=f"run_sql(June units minus January units per product at {city}, order desc) -> {rows[0][0]} "
-                       f"(+{rows[0][1]})")
-
-    return [pct_growth, days_above_avg, category_share, weekend_gap, best_date, unit_growth]
+    return [largest_drop, busy_days, older_effect, los_readmitted, busiest_day, long_stays]
 
 
 # ── stats ──────────────────────────────────────────────────────────────────

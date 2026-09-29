@@ -31,7 +31,19 @@ def build_state() -> dict:
         registry = json.loads(REGISTRY.read_text())
     except (OSError, ValueError):
         registry = {"agents": [], "forge_log": []}
-    events = read_events(EVENTS)
+    all_events = read_events(EVENTS)
+    # A presentation session starts from the Generalist alone: only events after the latest
+    # "session start" drive the story, and only agents that joined since then are shown.
+    session_id = max((e["id"] for e in all_events if e["type"] == "phase" and e.get("name") == "session start"),
+                     default=None)
+    events = [e for e in all_events if session_id is None or e["id"] >= session_id]
+    joined_order = [e["slug"] for e in events if e["type"] in ("agent_added", "node_joined") and e.get("slug")]
+    replay_events = [e for e in events if e.get("replay")]
+    replay = None
+    if replay_events:
+        recorded = [e["recorded_ts"] for e in replay_events if e.get("recorded_ts")] or [replay_events[0]["ts"]]
+        replay = {"from": min(recorded), "to": max(recorded),
+                  "live": not events or not events[-1].get("replay")}
 
     messages, pending, forge_status = [], {}, {r: "idle" for r in FORGE_ROLES}
     forge_timeline: list[dict] = []
@@ -97,6 +109,12 @@ def build_state() -> dict:
 
     registry_agents = registry.get("agents", [])
     by_slug = {a["slug"]: a for a in registry_agents}
+    if session_id is not None:  # generalist + agents that joined during this session, in join order
+        order = {slug: i for i, slug in enumerate(dict.fromkeys(joined_order))}
+        agents = sorted([a for a in agents if a["kind"] == "generalist" or a["slug"] in order],
+                        key=lambda a: -1 if a["kind"] == "generalist" else order[a["slug"]])
+        registry_agents = [a for a in registry_agents if a["kind"] == "generalist" or a["slug"] in order]
+        by_slug = {a["slug"]: a for a in registry_agents}
     team = [
         {"slug": a["slug"], "name": display_name(a["slug"]), "icon": icon(a.get("category"), a.get("kind")),
          "job": job(a), "kind": a["kind"], "skill": skill(a.get("category")) if a.get("category") else "Everything",
@@ -104,8 +122,10 @@ def build_state() -> dict:
          "on_node": (a.get("node") or {}).get("mode") in {"node", "local", "sim"}}
         for a in agents if a["status"] == "active"
     ]
-    traces = [ev for ev in events if ev["type"] == "trace"][-3:]
+    traces = [ev for ev in all_events if ev["type"] == "trace"][-3:]
     return {
+        "replay": replay,
+        "session": session_id is not None,
         "traces": traces,
         "story": build_story(events, by_slug),
         "team": team,

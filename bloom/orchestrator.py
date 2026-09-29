@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from bloom import llm
 from bloom.grid_client import GridClient
-from bloom.protocol import Capabilities, Result, Step, describe_payload
+from bloom.protocol import Capabilities, Result, Step, describe_payload, proposal_payload
 from bloom.routing import classify, pick_agent
 from bloom.specialist import resolve_spec, run_spec
 
@@ -21,7 +21,9 @@ TIERS = ("nodes", "payload", "inprocess")
 PLANNER_INSTRUCTIONS = """You are the planner of Bloom, a team of specialist agents.
 Break the user's task into 1-4 steps. Assign each step to exactly one available specialist
 (use "generalist" if none fits). A step may depend on earlier steps; their outputs are
-passed along automatically. If the task needs a capability no specialist has (for example
+passed along automatically. Specialists named <name>@<site> run AT that site with that site's
+private data; when a question needs several sites, plan one step per site and a later step that
+combines their (aggregate) results. If the task needs a capability no specialist has (for example
 writing a polished summary when there is no writer), still plan it with "generalist" AND
 list it under missing_capabilities.
 Reply with JSON only:
@@ -114,7 +116,8 @@ def plan(job: dict, registry: list[dict], client, model: str) -> tuple[list[Step
         agent = pick_agent(classify(job["task"]), registry)
         return [Step(job_id, "s1", agent["slug"], job["task"])], []
     roster = [{"slug": a["slug"], "category": a.get("category"), "purpose": a.get("purpose", ""),
-               **({"has_database": True} if a.get("has_db") else {})} for a in registry]
+               **({"has_database": True} if a.get("has_db") else {}),
+               **({"site": a["site"]} if a.get("site") else {})} for a in registry]
     try:
         text = llm.complete(client, model=model, instructions=PLANNER_INSTRUCTIONS,
                             input=f"Available specialists: {json.dumps(roster)}\n\nTask: {job['task']}")
@@ -170,6 +173,30 @@ def discover(grid: GridClient, nodes: list[dict], timeout: float = DISCOVERY_TIM
     return found
 
 
+def deliver(grid: GridClient, discovered: list[dict], proposal: dict, owner: str | None,
+            sender: str, timeout: float = 60) -> dict:
+    """Send a proposal to ONE inbox node of `owner` (the part after @ in the node name)."""
+    def owner_of(d):
+        name = str(d.get("node_name") or "")
+        return name.split("@", 1)[1] if "@" in name else None
+
+    targets = [d for d in discovered if d.get("inbox") and (not owner or owner_of(d) == owner)]
+    if not targets:
+        return {"ok": False, "error": f"no inbox node for owner {owner!r} answered discovery"}
+    target = targets[0]
+    pushed = grid.push([(target["node_id"], proposal_payload(proposal, sender))])
+    mid = pushed[0].get("message_id") if pushed else None
+    if not mid:
+        return {"ok": False, "error": pushed[0].get("error") if pushed else "push failed"}
+    replies, _ = grid.pull([mid], timeout)
+    if not replies or not replies[0].get("payload"):
+        return {"ok": False, "error": (replies[0].get("error") if replies else None) or "no reply from inbox node",
+                "node_id": target["node_id"]}
+    ack = json.loads(replies[0]["payload"])
+    return {**{k: ack.get(k) for k in ("ok", "slug", "spec_sha256", "path", "error")},
+            "node_id": target["node_id"], "node_name": target.get("node_name"), "message_id": mid}
+
+
 def merge_roster(registry: list[dict], discovered: list[dict], have_nodes: bool) -> list[dict]:
     """Planner/routing roster: generalist + local (in-process) specialists + discovered, approved nodes.
 
@@ -184,11 +211,13 @@ def merge_roster(registry: list[dict], discovered: list[dict], have_nodes: bool)
     for d in discovered:
         if not d.get("specialist") or not d.get("approved", True):
             continue
-        by_slug[d["specialist"]] = {
-            "slug": d["specialist"], "kind": "specialist", "category": d.get("category"),
-            "purpose": d.get("purpose", ""), "capabilities": d.get("tools", []), "node_id": d["node_id"],
-            "node_name": d.get("node_name"), "has_db": d.get("has_db", False), "model": d.get("model"),
-            "discovered": True,
+        site = d.get("site")
+        key = f"{d['specialist']}@{str(site).strip().lower().replace(' ', '-')}" if site else d["specialist"]
+        by_slug[key] = {
+            "slug": key, "kind": "specialist", "category": d.get("category"), "site": site,
+            "purpose": (f"{site}: " if site else "") + d.get("purpose", ""), "capabilities": d.get("tools", []),
+            "node_id": d["node_id"], "node_name": d.get("node_name"), "has_db": d.get("has_db", False),
+            "model": d.get("model"), "discovered": True,
         }
     return list(by_slug.values())
 
@@ -266,7 +295,7 @@ def execute(steps: list[Step], registry: list[dict], grid: GridClient, client, f
                 orch.record(s, "skipped", None, None, started, error="time budget exhausted")
                 continue
             try:
-                spec, post, _ = resolve_spec(s.specialist, s.spec)
+                spec, post, _ = resolve_spec(s.specialist.split("@")[0], s.spec)
             except LookupError:
                 spec, post, _ = resolve_spec("generalist", None)
             if emit:
@@ -296,6 +325,12 @@ def orchestrate(agent, context, text: str, client=None) -> dict:
     print(f"[bloom] discovery: {len(discovered)}/{len(nodes)} replied in {disc_ms}ms: "
           f"{[(d.get('specialist'), d.get('has_db'), d.get('approved')) for d in discovered]}")
     roster = merge_roster(registry, discovered, bool(nodes))
+    if job.get("mode") == "deliver":  # Forge -> node owner's inbox, over the Grid
+        res = deliver(grid, discovered, job.get("proposal") or {}, job.get("owner"), str(job.get("sender") or ""))
+        return {"job_id": job["job_id"], "answer": "delivered" if res.get("ok") else res.get("error"),
+                "output": json.dumps(res), "ok": bool(res.get("ok")), "steps": [], "missing_capabilities": [],
+                "delivered": res, "discovered": discovered, "discovery_ms": disc_ms,
+                "ms": int((time.monotonic() - started) * 1000)}
     if job.get("mode") == "describe":  # warm-up / smoke test: discovery only
         return {"job_id": job["job_id"], "answer": f"{len(discovered)} of {len(nodes)} nodes replied",
                 "output": json.dumps(discovered), "ok": bool(discovered) or not nodes, "steps": [],

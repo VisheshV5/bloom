@@ -6,7 +6,7 @@
     generalist_tools_check: { label: "AI + every tool + self-check", color: "#fbbf24" },
     specialist: { label: "Bloom specialist", color: "#7cf3c1" },
   };
-  const SKILL = { sql: "Sales data (SQL)", stats: "Statistics", dates: "Dates", units: "Unit conversion", extraction: "Text extraction", writing: "Writing" };
+  const SKILL = { sql: "Patient records (SQL)", stats: "Statistics", dates: "Dates", units: "Unit conversion", extraction: "Text extraction", writing: "Writing" };
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const pct = x => (x == null ? "–" : Math.round(100 * x) + "%");
   const pts = x => (x == null ? "–" : (x >= 0 ? "+" : "") + Math.round(100 * x));

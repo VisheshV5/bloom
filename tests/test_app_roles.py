@@ -29,12 +29,12 @@ def test_protocol_round_trip():
 
 
 def test_tool_loop_executes_local_tools(coffee_db):
-    calls = iter([[("run_sql", {"query": "SELECT COUNT(*) FROM stores"})], "FINAL: 4"])
+    calls = iter([[("run_sql", {"query": "SELECT COUNT(*) FROM patients"})], "FINAL: 1645"])
     client = FakeClient(lambda kw: next(calls))
     res = specialist.run_spec(SQL_SPEC["spec"], Step("j", "s1", "sql-analyst", SQL_TASK), client=client)
-    assert res.ok and res.answer == "4"
+    assert res.ok and res.answer == "1645"
     tool_out = [i for i in client.requests[1]["input"] if i.get("type") == "function_call_output"]
-    assert '"rows": [[4]]' in tool_out[0]["output"]
+    assert '"rows": [[1645]]' in tool_out[0]["output"]
 
 
 def test_specialist_replies_once_even_on_failure():

@@ -97,7 +97,8 @@ BAD_POSTPROCESS = (
 
 
 SIM_TOOLS = {
-    "sql": [("run_sql", "SELECT s.city, SUM(qty*price) FROM sales JOIN stores s ... GROUP BY s.city", "rows=[['San Francisco', 27223.3], ...]")],
+    "sql": [("run_sql", "SELECT protocol, COUNT(*), SUM(readmitted_30d) FROM admissions GROUP BY protocol",
+             "rows=[['new', 1080, 136], ['old', 565, 101]]")],
     "stats": [("ttest_welch", "a=[...30 values], b=[...30 values]", "t=5.420, df=56.15, p=1.30e-06")],
     "dates": [("add_business_days", "start=2026-04-01, days=-30", "2026-02-18"),
               ("business_days_in_range", "start=2026-04-01, end=2026-05-12", "30 dates")],
@@ -272,24 +273,24 @@ class MockBackend:
         by_slug = {a["slug"]: a for a in registry}
         self.bus.emit("message", src="user", dst="bloom", node_id=None, text=final_task.PROMPT[:160])
         self._sleep(1.0)
-        missing = [s for s in final_task.REQUIRED if s not in by_slug]
-        if "report-writer" in missing:
+        if not any(a.get("category") == "writing" for a in registry):
             return TaskResult(answer=None, ok=False, agent="bloom",
                               missing_capabilities=[final_task.MISSING_CAPABILITY],
                               error="planner: missing capability report-writer")
         ref = final_task.reference()
+        a_, b_ = ref["per_hospital"]["Hospital A"], ref["per_hospital"]["Hospital B"]
         outputs = {
-            "s1": f"Before: {ref['before_window'][0]}..{ref['before_window'][1]} (30 days). "
-                  f"After: {ref['after_window'][0]}..{ref['after_window'][1]} (30 days).",
-            "s2": f"before={ref['before_series']}\nafter={ref['after_series']}",
-            "s3": f"mean_before={ref['mean_before']}, mean_after={ref['mean_after']}, "
-                  f"change={ref['pct_change']}%, p={ref['p_value']}, significant={ref['significant']}",
-            "s4": final_task.ceo_note(ref),
+            "s1": f"Hospital A: old protocol {a_['old_readmits']}/{a_['old_n']} readmitted; new {a_['new_readmits']}/{a_['new_n']}.",
+            "s2": f"Hospital B: old protocol {b_['old_readmits']}/{b_['old_n']} readmitted; new {b_['new_readmits']}/{b_['new_n']}.",
+            "s3": f"Pooled readmission rate {ref['rate_old']}% -> {ref['rate_new']}% ({ref['change_pts']} pts); "
+                  f"z={ref['z']}, p={ref['p_value']:.2e}, significant={ref['significant']}",
+            "s4": final_task.committee_note(ref),
         }
         steps = []
         for step in final_task.PLAN:
-            slug = step["specialist"] if step["specialist"] in by_slug else "generalist"
-            tier, node_id = self._node_label(by_slug.get(slug, {"slug": slug}))
+            base = step["specialist"].split("@")[0]
+            slug = step["specialist"] if base in by_slug or step["specialist"] in by_slug else "generalist"
+            tier, node_id = self._node_label(by_slug.get(slug.split("@")[0], {"slug": slug}))
             for dep in step["depends_on"]:
                 dep_slug = next(s["specialist"] for s in final_task.PLAN if s["step_id"] == dep)
                 self.bus.emit("message", src=dep_slug, dst=slug, node_id=node_id, via="bloom",
@@ -302,7 +303,7 @@ class MockBackend:
         rng = self._rng("final-trace")
         clock, traced = 0, []
         for st in steps:
-            cat = by_slug.get(st["specialist"], {}).get("category")
+            cat = by_slug.get(st["specialist"].split("@")[0], {}).get("category")
             spans, usage = simulated_trace(cat, rng, checked=cat != "writing")
             start = clock + int(rng.uniform(80, 200))
             end = start + usage["ms"] + int(rng.uniform(300, 900))  # Grid hop + node startup
@@ -314,4 +315,4 @@ class MockBackend:
             clock = end
         self.bus.emit("trace", job_id="final-a", run_id=None, simulated=True, total_ms=clock,
                       plan_ms=int(rng.uniform(8000, 15000)), federation="(mock)", steps=traced)
-        return TaskResult(answer=note, output=note, agent="report-writer", steps=steps)
+        return TaskResult(answer=note, output=note, agent="writing-editor", steps=steps)

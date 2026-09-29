@@ -30,28 +30,40 @@ PIDS = RUNS / "nodes" / "pids.json"
 BASE_PORT = 9110
 
 
+SETTINGS = RUNS / "nodes" / "settings"
+
+
+def load_settings(slug: str) -> dict:
+    """Per-node owner settings written at approval time: {db, site, name, inbox, approved}."""
+    try:
+        return json.loads((SETTINGS / f"{slug}.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(slug: str, settings: dict) -> None:
+    SETTINGS.mkdir(parents=True, exist_ok=True)
+    (SETTINGS / f"{slug}.json").write_text(json.dumps(settings, indent=2))
+
+
 def node_config(slug: str) -> str:
     """--node-config for a node this laptop hosts.
 
-    bloom-specialty always; bloom-model if BLOOM_NODE_MODEL is set; bloom-db (the owner's SQLite
-    file, BLOOM_NODE_DB or runs/coffee.sqlite) ONLY for specialists that use run_sql, so the data
-    sits on that one node; bloom-approved if BLOOM_APPROVED points at an approved-hashes file.
+    bloom-specialty always; bloom-model if BLOOM_NODE_MODEL is set; bloom-db / bloom-site /
+    bloom-node-name / bloom-inbox / bloom-approved ONLY from this node's owner settings
+    (runs/nodes/settings/<slug>.json), so data is attached exactly where its owner said.
     """
-    from bloom.specialists import load_specialist
-
     env = node_env()
+    cfg = load_settings(slug)
     parts = [f'bloom-specialty="{slug}"']
     model = env.get("BLOOM_NODE_MODEL", "").strip()
     if model:
         parts.append(f'bloom-model="{model}"')
-    mod = load_specialist(slug)
-    if mod is not None and "run_sql" in getattr(mod, "TOOLS", []):
-        db = Path(env.get("BLOOM_NODE_DB") or RUNS / "coffee.sqlite").expanduser().resolve()
-        if db.exists():
-            parts.append(f'bloom-db="{db}"')
-    approved = env.get("BLOOM_APPROVED", "").strip()
-    if approved:
-        parts.append(f'bloom-approved="{Path(approved).expanduser()}"')
+    for key, field in (("bloom-db", "db"), ("bloom-site", "site"), ("bloom-node-name", "name"),
+                       ("bloom-inbox", "inbox"), ("bloom-approved", "approved")):
+        if cfg.get(field):
+            value = str(Path(cfg[field]).expanduser().resolve()) if field in ("db", "inbox", "approved") else cfg[field]
+            parts.append(f'{key}="{value}"')
     return " ".join(parts)
 
 
@@ -130,7 +142,8 @@ class NodeManager:
         return ["ssh-keygen", "-t", "ecdsa", "-b", "384", "-N", "", "-f", f"keys/{slug}"]
 
     def _register(self, slug):
-        return [*FLWR, "supernode", "register", f"keys/{slug}.pub", "supergrid", "--name", slug, "--format", "json"]
+        name = load_settings(slug).get("name") or slug
+        return [*FLWR, "supernode", "register", f"keys/{slug}.pub", "supergrid", "--name", name, "--format", "json"]
 
     def _add(self, slug, node_id):
         return [*FLWR, "federation", "add-supernode", str(node_id), self.federation, "supergrid"]

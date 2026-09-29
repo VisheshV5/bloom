@@ -44,7 +44,12 @@ def _node_id(n: dict) -> str:
     return str(n.get("node-id", n.get("node_id", n.get("id", ""))))
 
 
-def find_node(slug: str, node_id: str | None, nodes: list[dict]) -> dict | None:
+def find_node(slug: str, node_id: str | None, nodes: list[dict], owner: str | None = None,
+              taken: set[str] = frozenset()) -> dict | None:
+    if owner and not node_id:  # a new online node of that owner that no agent uses yet
+        fresh = [n for n in nodes if (n.get("owner-name") == owner and _node_id(n) not in taken
+                                      and str(n.get("status", "")).lower() == "online")]
+        return fresh[0] if fresh else None
     for n in nodes:
         if node_id and _node_id(n) == str(node_id):
             return n
@@ -54,14 +59,16 @@ def find_node(slug: str, node_id: str | None, nodes: list[dict]) -> dict | None:
 
 
 def activate(registry, slug: str, node_id: str | None = None, bus=None, backend=None,
-             timeout: float = 600, poll: float = 10, lister=list_nodes, sleep=time.sleep) -> dict:
+             timeout: float = 600, poll: float = 10, lister=list_nodes, sleep=time.sleep,
+             owner: str | None = None) -> dict:
     entry = registry.get(slug)
     if entry is None:
         raise ValueError(f"{slug} is not in the registry")
     deadline = time.monotonic() + timeout
     node = None
     while time.monotonic() < deadline:
-        node = find_node(slug, node_id, lister())
+        taken = {str((a.get("node") or {}).get("node_id")) for a in registry.agents if a["slug"] != slug}
+        node = find_node(slug, node_id, lister(), owner=owner, taken=taken)
         if node and str(node.get("status", "")).lower() == "online":
             break
         state = node.get("status") if node else "not registered yet"

@@ -45,7 +45,7 @@ class ForgeOutcome:
 class Forge:
     def __init__(self, backend, registry: Registry, bus, approver: TerminalApprover,
                  nodes: NodeManager, benchmark: list[dict], run_build: bool = True,
-                 publish_standalone: bool = False):
+                 publish_standalone: bool = False, deliver_to: str | None = None):
         self.backend = backend
         self.registry = registry
         self.bus = bus
@@ -54,6 +54,7 @@ class Forge:
         self.benchmark = benchmark
         self.run_build = run_build
         self.publish_standalone = publish_standalone
+        self.deliver_to = deliver_to  # node-name owner suffix, e.g. "brian" for <slug>@brian
 
     def _stage(self, stage: str, **data) -> None:
         self.bus.emit("forge_stage", stage=stage, **data)
@@ -152,9 +153,21 @@ class Forge:
         self.bus.emit("proposal", slug=slug, category=spec["category"], purpose=spec["purpose"], tools=spec["tools"],
                       tests=review.get("tests"), attempts=attempt, spec_sha256=digest, path=str(path.relative_to(ROOT)))
         self.registry.log_forge(gap=gap, outcome="proposed", slug=slug, attempts=attempt)
-        print(f"Proposal ready: send {path.relative_to(ROOT)} to the node owner (spec_sha256 {digest[:16]}…). "
-              f"Then: python -m forge activate {slug}")
+        print(f"Proposal ready: {path.relative_to(ROOT)} (spec_sha256 {digest[:16]}…).")
+        if self.deliver_to and hasattr(self.backend, "deliver"):
+            self.deliver_proposal(proposal)
+        else:
+            print(f"Send it to the node owner, then: python -m forge activate {slug}")
         return ForgeOutcome("proposed", slug, attempt)
+
+    def deliver_proposal(self, proposal: dict) -> dict:
+        """Over the Grid to the owner's inbox; their launcher asks them y/N on their machine."""
+        self._stage("delivering", slug=proposal["slug"], owner=self.deliver_to)
+        res = self.backend.deliver(proposal, self.deliver_to)
+        self.bus.emit("delivered", slug=proposal["slug"], owner=self.deliver_to, ok=bool(res.get("ok")),
+                      node_id=res.get("node_id"), node_name=res.get("node_name"), error=res.get("error"))
+        print(f"Delivery to {self.deliver_to}: {'OK -> ' + str(res.get('path')) if res.get('ok') else res.get('error')}")
+        return res
 
 
     def grow(self, gap: dict) -> ForgeOutcome:

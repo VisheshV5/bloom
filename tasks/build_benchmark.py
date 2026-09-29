@@ -15,7 +15,6 @@ import json
 import random
 from pathlib import Path
 
-from tasks import coffee_data as coffee
 from bloom.tools.sql import SCHEMA_DESCRIPTION
 from bloom.tools import dates, stats, units
 from tasks import local_db as sql
@@ -27,14 +26,7 @@ DEV_PER_CATEGORY = 8
 FINAL_HINT = " End your reply with a line `FINAL: <answer>`."
 CATEGORIES = ["sql", "stats", "dates", "units", "extraction"]
 
-REVENUE_JOIN = (
-    "FROM sales JOIN stores s ON s.id = sales.store_id "
-    "JOIN products p ON p.id = sales.product_id"
-)
 MONTHS = {1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June"}
-CITIES = [s[2] for s in coffee.STORES]
-PRODUCTS = [p[1] for p in coffee.PRODUCTS]
-PRODUCT_CATS = sorted({p[2] for p in coffee.PRODUCTS})
 BD = "Business days are Monday to Friday; there are no holidays."
 
 
@@ -67,65 +59,67 @@ def _rand_date(rng, start="2026-01-01", span=700) -> str:
     return dates.add_days(start, rng.randint(0, span))
 
 
-# ── SQL ────────────────────────────────────────────────────────────────────
+# ── SQL (Hospital A's records) ────────────────────────────────────────────────
+WARDS = ["cardiology", "respiratory", "general medicine", "orthopedics"]
+DIAGNOSES = ["heart failure", "pneumonia", "COPD", "diabetes", "hip replacement", "sepsis"]
+
+
 def _sql_templates():
-    p = f"You have access to Bloom Coffee Co. sales data. {SCHEMA_DESCRIPTION} "
+    p = f"You have access to Hospital A's patient records. {SCHEMA_DESCRIPTION} "
 
-    def city_max(rng):
+    def busiest_ward(rng):
         _, name, ym = _month(rng)
-        return _mk("sql", p + f"Which city had the highest total revenue in {name} 2026? Answer with the city name.",
-                   _one(f"SELECT s.city {REVENUE_JOIN} WHERE date LIKE '{ym}%' GROUP BY s.city ORDER BY SUM(qty*price) DESC LIMIT 1"),
+        return _mk("sql", p + f"Which ward had the most admissions in {name} 2026? Answer with the ward name.",
+                   _one(f"SELECT ward FROM admissions WHERE admit_date LIKE '{ym}%' GROUP BY ward ORDER BY COUNT(*) DESC LIMIT 1"),
                    "exact")
 
-    def total(rng):
+    def total_adm(rng):
         _, name, ym = _month(rng)
-        return _mk("sql", p + f"What was the total revenue across all stores in {name} 2026? Round to the nearest dollar.",
-                   round(_one(f"SELECT SUM(qty*price) {REVENUE_JOIN} WHERE date LIKE '{ym}%'")), "number", {"abs": 1})
+        return _mk("sql", p + f"How many admissions were there in {name} 2026?",
+                   _one(f"SELECT COUNT(*) FROM admissions WHERE admit_date LIKE '{ym}%'"), "number", {"abs": 0})
 
-    def top_product(rng):
+    def top_diag(rng):
         _, name, ym = _month(rng)
-        city = rng.choice(CITIES)
-        return _mk("sql", p + f"Which product sold the most units at the {city} store in {name} 2026? Answer with the product name.",
-                   _one(f"SELECT p.name {REVENUE_JOIN} WHERE date LIKE '{ym}%' AND s.city='{city}' GROUP BY p.name ORDER BY SUM(qty) DESC LIMIT 1"),
-                   "exact")
+        ward = rng.choice(WARDS[:3])
+        return _mk("sql", p + f"Which diagnosis had the most admissions to the {ward} ward in {name} 2026? Answer with the diagnosis.",
+                   _one(f"SELECT diagnosis FROM admissions WHERE admit_date LIKE '{ym}%' AND ward='{ward}' "
+                        "GROUP BY diagnosis ORDER BY COUNT(*) DESC LIMIT 1"), "exact")
 
-    def units_sold(rng):
+    def readmits(rng):
         _, name, ym = _month(rng)
-        city, prod = rng.choice(CITIES), rng.choice(PRODUCTS)
-        return _mk("sql", p + f"How many units of {prod} were sold at the {city} store in {name} 2026?",
-                   _one(f"SELECT SUM(qty) {REVENUE_JOIN} WHERE date LIKE '{ym}%' AND s.city='{city}' AND p.name='{prod}'"),
+        diag = rng.choice(DIAGNOSES)
+        return _mk("sql", p + f"How many {diag} admissions in {name} 2026 were readmitted within 30 days?",
+                   _one(f"SELECT SUM(readmitted_30d) FROM admissions WHERE admit_date LIKE '{ym}%' AND diagnosis='{diag}'"),
                    "number", {"abs": 0})
 
-    def store_min(rng):
+    def avg_los(rng):
         _, name, ym = _month(rng)
-        cat = rng.choice(PRODUCT_CATS)
-        return _mk("sql", p + f"Which store (store name) had the lowest {cat} revenue in {name} 2026?",
-                   _one(f"SELECT s.name {REVENUE_JOIN} WHERE date LIKE '{ym}%' AND p.category='{cat}' GROUP BY s.name ORDER BY SUM(qty*price) ASC LIMIT 1"),
-                   "exact")
+        ward = rng.choice(WARDS)
+        return _mk("sql", p + f"What was the average length of stay (days) in the {ward} ward for admissions in {name} 2026? Round to 2 decimals.",
+                   round(_one(f"SELECT AVG(length_of_stay) FROM admissions WHERE admit_date LIKE '{ym}%' AND ward='{ward}'"), 2),
+                   "number", {"abs": 0.01})
 
-    def avg_daily(rng):
-        m, name, ym = _month(rng)
-        city = rng.choice(CITIES)
-        days = calendar.monthrange(2026, m)[1]
-        return _mk("sql", p + f"What was the average daily revenue of the {city} store in {name} 2026? Round to 2 decimals.",
-                   round(_one(f"SELECT SUM(qty*price)/{days}.0 {REVENUE_JOIN} WHERE date LIKE '{ym}%' AND s.city='{city}'"), 2),
-                   "number", {"rel": 0.002})
+    def rate_by_protocol(rng):
+        diag, proto = rng.choice(DIAGNOSES), rng.choice(["old", "new"])
+        return _mk("sql", p + f"What was the 30-day readmission rate (percent) for {diag} admissions under the {proto} discharge protocol? Round to 1 decimal.",
+                   round(100 * _one(f"SELECT AVG(readmitted_30d) FROM admissions WHERE diagnosis='{diag}' AND protocol='{proto}'"), 1),
+                   "number", {"abs": 0.1})
 
-    def weekday_revenue(rng):
-        city = rng.choice(CITIES)
-        dow = rng.choice([("Saturday", 6), ("Monday", 1), ("Friday", 5), ("Sunday", 0)])
-        return _mk("sql", p + f"What was the total revenue of the {city} store on {dow[0]}s in Q1 2026 (January to March)? Round to the nearest dollar.",
-                   round(_one(f"SELECT SUM(qty*price) {REVENUE_JOIN} WHERE date < '2026-04-01' AND s.city='{city}' "
-                              f"AND CAST(strftime('%w', date) AS INTEGER) = {dow[1]}")), "number", {"abs": 1})
-
-    def cat_city(rng):
+    def older_patients(rng):
         _, name, ym = _month(rng)
-        city, cat = rng.choice(CITIES), rng.choice(PRODUCT_CATS)
-        return _mk("sql", p + f"What was the {cat} revenue at the {city} store in {name} 2026? Round to the nearest dollar.",
-                   round(_one(f"SELECT SUM(qty*price) {REVENUE_JOIN} WHERE date LIKE '{ym}%' AND s.city='{city}' AND p.category='{cat}'")),
-                   "number", {"abs": 1})
+        age = rng.choice([60, 65, 70, 75])
+        return _mk("sql", p + f"How many admissions in {name} 2026 were for patients aged {age} or older?",
+                   _one(f"SELECT COUNT(*) FROM admissions a JOIN patients pt ON pt.patient_id = a.patient_id "
+                        f"WHERE a.admit_date LIKE '{ym}%' AND pt.age >= {age}"), "number", {"abs": 0})
 
-    return [city_max, total, top_product, units_sold, store_min, avg_daily, weekday_revenue, cat_city]
+    def female_share(rng):
+        ward = rng.choice(WARDS)
+        return _mk("sql", p + f"What percentage of admissions to the {ward} ward were female patients? Round to 1 decimal.",
+                   round(100 * _one(f"SELECT AVG(CASE WHEN pt.sex='F' THEN 1.0 ELSE 0 END) FROM admissions a "
+                                    f"JOIN patients pt ON pt.patient_id = a.patient_id WHERE a.ward='{ward}'"), 1),
+                   "number", {"abs": 0.1})
+
+    return [busiest_ward, total_adm, top_diag, readmits, avg_los, rate_by_protocol, older_patients, female_share]
 
 
 # ── stats ──────────────────────────────────────────────────────────────────

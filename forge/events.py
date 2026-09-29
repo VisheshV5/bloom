@@ -12,7 +12,7 @@ from forge.paths import EVENTS
 EVENT_TYPES = {
     "agent_added", "agent_status", "message", "task_result", "gap_flagged", "forge_stage",
     "approval_pending", "approval_resolved", "node_joined", "published", "final_task",
-    "phase", "error", "info", "eval_result", "trace", "proposal",
+    "phase", "error", "info", "eval_result", "trace", "proposal", "delivered",
 }
 
 

@@ -38,6 +38,10 @@
   .step.done b { background: var(--green-bg); }
   .step.now { color: var(--bg); background: var(--green); border-color: var(--green); font-weight: 700; }
   .step.now b { background: rgba(0,0,0,.18); color: var(--bg); }
+  .mode { font: 800 14px/1 ui-monospace, Menlo, monospace; letter-spacing: .12em; padding: 8px 12px; border-radius: 8px; white-space: nowrap; }
+  .mode.replay { background: var(--amber); color: var(--bg); }
+  .mode.live { background: #ff5d5d; color: #fff; animation: livePulse 1.6s ease-in-out infinite; }
+  @keyframes livePulse { 50% { opacity: .55; } }
   .team-count { text-align: right; line-height: 1; }
   .team-count small { display: block; color: var(--muted); font-size: 14px; letter-spacing: .1em; text-transform: uppercase; }
   .team-count strong { font-size: 40px; font-weight: 800; }
@@ -151,6 +155,7 @@
 <header>
   <div class="logo">bl<span>oo</span>m</div>
   <div class="steps" id="steps"></div>
+  <div class="mode" id="mode" hidden></div>
   <div class="team-count"><small>Team size</small><strong>1 → <em id="count">1</em></strong></div>
 </header>
 
@@ -208,6 +213,15 @@ function drawSteps(story) {
     const n = i + 1, cls = n < story.step ? "done" : n === story.step ? "now" : "";
     return `<div class="step ${cls}"><b>${n < story.step ? "✓" : n}</b>${esc(name)}</div>`;
   }).join("");
+}
+
+function drawMode(r) {
+  const el = $("mode");
+  if (!r) { el.hidden = true; return; }
+  const hm = t => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  el.hidden = false;
+  el.className = "mode " + (r.live ? "live" : "replay");
+  el.textContent = r.live ? "● LIVE" : `REPLAY · recorded ${hm(r.from)}–${hm(r.to)}`;
 }
 
 function drawStory(story) {
@@ -320,7 +334,7 @@ function drawNow(n) {
   if (n.kind === "approval") {
     html = `<div class="label">✋ Waiting for human approval</div><div class="big">${ico}${esc(n.title)}</div>` +
       `<div class="body">${esc(n.body)}</div><div class="detail">${esc(n.detail)} · uses ${n.tools} tool${n.tools === 1 ? "" : "s"}</div>` +
-      `<div class="detail">${n.owner ? `Sent to the node owner · spec ${esc(n.sha)}… · they approve on their own machine.` : "Approve it in the terminal."}</div>`;
+      `<div class="detail">${n.owner ? (n.sha ? `Spec ${esc(n.sha)}… · ` : "") + "the data owner approves on their own machine." : "Approve it in the terminal."}</div>`;
   } else if (n.kind === "building") {
     const r = n.roles || {};
     const row = (k, label) => `<div class="role ${r[k] || "todo"}"><i>${r[k] === "done" ? "✓" : ""}</i>${label}</div>`;
@@ -362,6 +376,7 @@ async function tick() {
   try {
     const s = await (await fetch("/api/state", { cache: "no-store" })).json();
     drawSteps(s.story);
+    drawMode(s.replay);
     drawStory(s.story);
     $("count").textContent = s.team.length;
     drawTeam(s.team);

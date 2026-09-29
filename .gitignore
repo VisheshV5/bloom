@@ -10,3 +10,4 @@ keys/
 *.key
 .DS_Store
 !.env.example
+dashboard/web/node_modules/

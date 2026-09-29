@@ -33,6 +33,7 @@ def parse_jobs(output: str) -> list[dict]:
             continue
     return jobs
 RUN_TIMEOUT_S = 420  # includes time queued on SuperGrid
+DISCOVERY_FIELDS = ("specialist", "node_id", "node_name", "site", "has_db", "approved", "model", "inbox")
 EVAL_BATCH_SIZE = 6  # jobs per AgentApp run, all in parallel: one wave stays well under 5 minutes
 EVAL_PARALLEL_RUNS = 3
 
@@ -119,8 +120,7 @@ class SuperGridBackend:
         res = self._run("orchestrate", {"task": "describe", "mode": "describe", "job_id": "describe"}, registry)
         found = res.get("discovered") or []
         self.bus.emit("info", message=f"discovery: {len(found)} node(s) replied in {res.get('discovery_ms')}ms",
-                      discovered=[{k: d.get(k) for k in ("specialist", "node_name", "has_db", "approved", "model")}
-                                  for d in found])
+                      discovered=[{k: d.get(k) for k in DISCOVERY_FIELDS} for d in found])
         return res
 
     # ── Forge roles ────────────────────────────────────────────────────────
@@ -160,6 +160,9 @@ class SuperGridBackend:
                           tier=s.get("tier"), text=f"step {s.get('step_id')}")
             self.bus.emit("message", src=s.get("specialist"), dst="bloom", node_id=s.get("node_id"),
                           tier=s.get("tier"), text=f"FINAL: {s.get('answer')}")
+        if res.get("discovered"):
+            self.bus.emit("info", message=f"discovery: {len(res['discovered'])} node(s)",
+                          discovered=[{k: d.get(k) for k in DISCOVERY_FIELDS} for d in res["discovered"]])
         if steps:
             self.bus.emit("trace", job_id=job["job_id"], run_id=res.get("run_id"), simulated=False,
                           total_ms=res.get("ms"), plan_ms=(planned_ms if job.get("plan") else None),

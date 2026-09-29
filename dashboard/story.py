@@ -33,6 +33,9 @@ ROLE_TEXT = {
 def display_name(slug: str | None) -> str:
     if not slug:
         return "an agent"
+    if "@" in slug:  # site-aware roster name: hospital-sql-analyst@hospital-a
+        base, site = slug.split("@", 1)
+        return f"{display_name(base)} · {display_name(site)}"
     words = slug.replace("_", "-").split("-")
     return " ".join(w.upper() if w in {"sql", "ai", "api"} else w.capitalize() for w in words)
 

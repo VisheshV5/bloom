@@ -26,6 +26,43 @@ FORGE_ROLES = ["architect", "builder", "reviewer"]
 RECENT_MESSAGES = 40
 
 
+LOCAL_OWNER = "vishesh"  # nodes registered from this laptop without an @owner suffix
+
+
+def places(registry_agents: list[dict], nodes: dict, trace: dict | None) -> list[dict]:
+    """Where each step of the latest team task ran: specialist, site, node id, and whose laptop."""
+    owners = {}
+    for a in registry_agents:
+        node = a.get("node") or {}
+        if node.get("node_id") and node.get("name"):
+            name = str(node["name"])
+            owners[str(node["node_id"])] = name.split("@", 1)[1] if "@" in name else LOCAL_OWNER
+    owners.update({nid: d["owner"] for nid, d in nodes.items() if d.get("owner")})
+    site_owner, local_slugs = {}, set()
+    for f in (RUNS / "nodes" / "settings").glob("*.json"):
+        try:
+            cfg = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if cfg.get("site"):
+            site_owner[str(cfg["site"]).lower().replace(" ", "-")] = str(cfg.get("name", "@" + LOCAL_OWNER)).split("@")[-1]
+    try:
+        local_slugs = set(json.loads((RUNS / "nodes" / "pids.json").read_text()))
+    except (OSError, ValueError):
+        pass
+    out = []
+    for st in (trace or {}).get("steps") or []:
+        spec = str(st.get("specialist") or "")
+        base, _, site = spec.partition("@")
+        nid = str(st.get("node_id") or "") or None
+        owner = owners.get(nid or "") or site_owner.get(site)
+        if not owner and st.get("tier") == "nodes" and base in local_slugs:
+            owner = LOCAL_OWNER
+        out.append({"specialist": spec, "slug": base, "site": site or None, "node_id": nid,
+                    "tier": st.get("tier"), "owner": owner})
+    return out
+
+
 def build_state() -> dict:
     try:
         registry = json.loads(REGISTRY.read_text())
@@ -123,8 +160,16 @@ def build_state() -> dict:
         for a in agents if a["status"] == "active"
     ]
     traces = [ev for ev in all_events if ev["type"] == "trace"][-3:]
+    nodes: dict[str, dict] = {}  # node_id -> {specialist, node_name, site, owner, has_db} from the latest discovery
+    for ev in all_events:
+        for d in ev.get("discovered") or []:
+            if d.get("node_id"):
+                name = str(d.get("node_name") or "")
+                nodes[str(d["node_id"])] = {**d, "owner": name.split("@", 1)[1] if "@" in name else "vishesh"}
     return {
         "replay": replay,
+        "nodes": nodes,
+        "places": places(registry.get("agents", []), nodes, traces[-1] if traces else None),
         "session": session_id is not None,
         "traces": traces,
         "story": build_story(events, by_slug),
@@ -155,8 +200,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         url = urlparse(self.path)
-        if url.path in ("/", "/index.html"):
+        dist = HERE / "dist"
+        if url.path in ("/", "/index.html") and (dist / "index.html").exists():
+            self._send((dist / "index.html").read_bytes(), "text/html; charset=utf-8")
+        elif url.path in ("/", "/index.html", "/classic"):
             self._send((HERE / "index.html").read_bytes(), "text/html; charset=utf-8")
+        elif url.path.startswith("/assets/") and (dist / "assets").exists():
+            path = (dist / url.path.lstrip("/")).resolve()
+            types = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}
+            if path.parent != (dist / "assets").resolve() or not path.exists():
+                self._send(b"not found", "text/plain", 404)
+            else:
+                self._send(path.read_bytes(), types.get(path.suffix, "application/octet-stream"))
         elif url.path.startswith("/static/"):
             name = url.path.removeprefix("/static/")
             path = (HERE / "static" / name).resolve()

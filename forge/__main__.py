@@ -183,7 +183,7 @@ def cmd_replay(args) -> None:
     from forge.replay import replay
 
     bus = EventBus(echo=not args.quiet)
-    done = replay(bus, Registry(), seconds_per_agent=args.seconds, exclude=args.exclude or ())
+    done = replay(bus, Registry(), seconds_per_agent=args.seconds, exclude=args.exclude or (), final=args.final)
     print("Replayed:", ", ".join(done))
 
 
@@ -294,6 +294,7 @@ def main(argv=None) -> None:
     sub.add_parser("proposals")
     p = sub.add_parser("session"); p.add_argument("action", choices=["start"])
     p = sub.add_parser("replay"); p.add_argument("--seconds", type=float, default=8.0)
+    p.add_argument("--final", action="store_true", help="then replay the latest passing team task")
     p.add_argument("--exclude", nargs="*"); p.add_argument("--quiet", action="store_true")
     p = sub.add_parser("deliver"); _common(p); p.add_argument("slug")
     p = sub.add_parser("approve"); p.add_argument("slug"); p.add_argument("--db"); p.add_argument("--site")

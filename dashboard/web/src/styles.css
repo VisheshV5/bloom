@@ -1,0 +1,28 @@
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+  --bg: #0a0e0c;
+  --panel: #111814;
+  --line: #1f2b24;
+  --ink: #eef5ef;
+  --muted: #8fa396;
+  --green: #4ade80;
+  --vine: #3d7a50;
+  --brian: #f472b6;
+  --vishesh: #a78bfa;
+  --hub: #fbbf24;
+  --plain: #94a3b8;
+}
+html, body, #root { height: 100%; margin: 0; }
+body {
+  background: radial-gradient(1200px 700px at 50% 45%, #10231a 0%, var(--bg) 70%);
+}
+@media (min-width: 62em) { body { overflow: hidden; } }
+.kbd {
+  display: inline-block; min-width: 20px; padding: 0 6px; margin-right: 8px;
+  border: 1px solid #3b4a41; border-bottom-width: 2px; border-radius: 6px;
+  font-size: 12px; line-height: 20px; text-align: center; color: var(--ink);
+}
+.sql {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  white-space: pre-wrap; word-break: break-word; color: #c7f9d4;
+}

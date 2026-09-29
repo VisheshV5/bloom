@@ -2,6 +2,7 @@
 
   python -m forge replay                  # session start (Generalist only), then each build
   python -m forge replay --seconds 8 --exclude currency-calculator
+  python -m forge replay --final          # ...then the latest team task, messages re-timed from its trace
 
 Every replayed event is copied from runs/events.jsonl (tagged replay=True with its original
 timestamp in recorded_ts); the only derived event is the opening "generalist got a sales
@@ -44,14 +45,18 @@ def build_cycles(history: list[dict], registry) -> list[tuple[str, list[dict]]]:
 
 
 def replay(bus, registry, seconds_per_agent: float = 8.0, pause: float = 2.0, exclude=(), reset: bool = True,
-           sleep=time.sleep) -> list[str]:
-    history = [e for e in read_events(bus.path) if not e.get("replay")]
-    sessions = [e["id"] for e in history if e["type"] == "phase" and e.get("name") == "session start"]
+           sleep=time.sleep, final: bool = False, final_seconds: float = 12.0) -> list[str]:
+    every = read_events(bus.path)
+    replayed_after = {e["id"] - 1 for e in every if e.get("replay")}
+    history = [e for e in every if not e.get("replay")]
+    # A replay's own "session start" is not a real reset, so replaying twice still finds every build.
+    sessions = [e["id"] for e in history if e["type"] == "phase" and e.get("name") == "session start"
+                and e["id"] not in replayed_after]
     if sessions:  # replay only what happened before the latest session reset
         history = [e for e in history if e["id"] < sessions[-1]]
     cycles = [(s, ev) for s, ev in build_cycles(history, registry) if s not in set(exclude)]
     if reset:
-        bus.emit("phase", name="session start")
+        bus.emit("phase", name="session start", replay=True)
         sleep(pause * 2)
     miss = next((e for e in history if e["type"] == "task_result" and e.get("agent") == "generalist"
                  and e.get("category") == "sql" and not e.get("correct")), None)
@@ -73,5 +78,57 @@ def replay(bus, registry, seconds_per_agent: float = 8.0, pause: float = 2.0, ex
             bus.emit(e["type"], **fields, replay=True, recorded_ts=e["ts"])
         done.append(slug)
         sleep(pause)
+    if final:
+        final_events = last_final(history)
+        if final_events:
+            replay_final(bus, final_events, final_seconds, sleep)
+            done.append("final")
     bus.emit("phase", name="replay done", replay=True)
     return done
+
+
+def last_final(history: list[dict]) -> list[dict]:
+    """The events of the latest passing team task: its question, messages, trace, and answer."""
+    finals = [e for e in history if e["type"] == "final_task" and e.get("passed")]
+    if not finals:
+        return []
+    end = finals[-1]["id"]
+    start = max((e["id"] for e in history if e["type"] == "phase" and e.get("name") == "final task" and e["id"] < end),
+                default=None)
+    if start is None:
+        return []
+    return [e for e in history if start <= e["id"] <= end]
+
+
+def replay_final(bus, events: list[dict], seconds: float, sleep) -> None:
+    """Messages are logged together when the run ends, so re-time them from the trace: each step's
+    question goes out when the step started and its answer comes back when it ended."""
+    trace = next((e for e in events if e["type"] == "trace"), {})
+    steps = trace.get("steps") or []
+    total = max([s.get("end_ms") or 0 for s in steps] + [1])
+    at = {}
+    for s in steps:
+        spec = s.get("specialist")
+        at[("bloom", spec)] = (s.get("start_ms") or 0) / total
+        at[(spec, "bloom")] = (s.get("end_ms") or total) / total
+
+    def emit(e):
+        fields = {k: v for k, v in e.items() if k not in ("id", "ts", "type")}
+        bus.emit(e["type"], **fields, replay=True, recorded_ts=e["ts"])
+
+    head = [e for e in events if e["type"] in ("phase", "info") or (e["type"] == "message" and e.get("src") == "forge")]
+    for e in head:
+        emit(e)
+        sleep(1.5)
+    timed = sorted((e for e in events if e["type"] == "message" and e.get("src") != "forge"),
+                   key=lambda e: at.get((e.get("src"), e.get("dst")), 1.0))
+    clock = 0.0
+    for e in timed:
+        t = at.get((e.get("src"), e.get("dst")), 1.0) * seconds
+        sleep(max(0.0, t - clock))
+        clock = max(clock, t)
+        emit(e)
+    sleep(1.0)
+    for e in events:
+        if e["type"] in ("trace", "final_task"):
+            emit(e)

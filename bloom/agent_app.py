@@ -42,6 +42,9 @@ def main(agent: AgentSession, context: Context) -> None:
         if mode == "orchestrate":
             result = orchestrator.orchestrate(agent, context, text)
             summary = result["output"] or f"(no answer) {result}"
+        elif mode == "plan":  # needs the Grid for discovery, so it lives with the orchestrator
+            result = orchestrator.plan_run(agent, context, text)
+            summary = json.dumps(result)[:4000]
         else:
             result = forge_roles.run(mode, text, context)
             summary = json.dumps(result)[:4000]

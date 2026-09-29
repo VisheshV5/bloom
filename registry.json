@@ -393,22 +393,23 @@
         "version": 1
       },
       "module": "bloom/specialists/hospital_sql_analyst.py",
-      "status": "proposed",
+      "status": "active",
       "created_at": "2026-09-29T21:15:29Z",
       "created_by": [
         "architect",
         "builder",
         "reviewer"
       ],
-      "approved_by": null,
+      "approved_by": "node-owner:brianhuang08",
       "node": {
-        "mode": "inprocess",
-        "node_id": null,
-        "name": null
+        "mode": "node",
+        "node_id": "7563003871865368859",
+        "name": "hospital-sql-analyst@brianhuang08"
       },
       "hub": null,
       "scores": {},
-      "spec_sha256": "81cf99f414d9ee5ac7e561e91139213a4815551b2eec8386ddc49a6ab6247c19"
+      "spec_sha256": "81cf99f414d9ee5ac7e561e91139213a4815551b2eec8386ddc49a6ab6247c19",
+      "activated_at": "2026-09-29T21:19:30Z"
     }
   ],
   "forge_log": [

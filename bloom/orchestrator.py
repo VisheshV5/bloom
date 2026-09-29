@@ -306,6 +306,25 @@ def execute(steps: list[Step], registry: list[dict], grid: GridClient, client, f
     return orch
 
 
+def plan_run(agent, context, text: str, client=None) -> dict:
+    """Planning as its own run (keeps each run under 5 min) -- but planned against what the Grid
+    actually offers right now (discovery), so site-specific agents like X@hospital-a are visible."""
+    job = parse_job(text)
+    job = {**job, "mode": "plan", "job_id": job.get("job_id", "plan")}
+    registry = load_registry(context)
+    client = client or llm.runtime_client()
+    model = str(context.run_config.get("bloom.orchestrator-model", "flwrlabs/endeavor-1.0"))
+    grid = GridClient(agent.grid)
+    nodes = grid.nodes()
+    discovered = discover(grid, nodes) if nodes else []
+    roster = merge_roster(registry, discovered, bool(nodes))
+    print(f"[bloom] planning with roster: {[r['slug'] for r in roster]}")
+    steps, missing = plan(job, roster, client, model)
+    return {"model": model, "missing_capabilities": missing, "roster": [r["slug"] for r in roster],
+            "steps": [{"step_id": s.step_id, "specialist": s.specialist, "instruction": s.instruction,
+                       "depends_on": s.depends_on} for s in steps]}
+
+
 def orchestrate(agent, context, text: str, client=None) -> dict:
     started = time.monotonic()
     job = parse_job(text)

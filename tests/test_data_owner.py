@@ -232,3 +232,21 @@ def test_owner_approve_checks_hash_and_records_approval(tmp_path, monkeypatch):
     import pytest
     with pytest.raises(RuntimeError):
         owner.approve("records-analyst", None, None, None, None, confirm=lambda q: True, out=lambda *a: None, start=False)
+
+
+def test_planning_run_sees_discovered_sites():
+    plan = {"steps": [{"step_id": "s1", "specialist": "hospital-sql-analyst@hospital-a", "instruction": "count",
+                       "depends_on": []}], "missing_capabilities": []}
+    seen_rosters = []
+
+    def respond(kw):
+        seen_rosters.append(json.dumps(kw.get("input")))
+        return json.dumps(plan)
+
+    def node(agent, msg):
+        handle_grid_message(agent, LocalContext(node_config={"bloom-specialty": SLUG, "bloom-site": "Hospital A"}),
+                            msg, client=FakeClient())
+
+    grid = FakeSuperLinkGrid([{"id": "1", "name": "x@brian", "location": None}], node_handler=node)
+    out = orchestrator.plan_run(LocalAgent(grid=grid), LocalContext({}), "Compare hospitals", client=FakeClient(respond))
+    assert f"{SLUG}@hospital-a" in out["roster"] and f"{SLUG}@hospital-a" in seen_rosters[0]

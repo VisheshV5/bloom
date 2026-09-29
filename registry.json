@@ -66,26 +66,27 @@
         "builder",
         "reviewer"
       ],
-      "approved_by": "vverm",
+      "approved_by": "node-owner:brianhuang08",
       "node": {
         "mode": "node",
-        "node_id": "6646703200242624380",
-        "name": "sql-analyst",
-        "federation": "@vverm/bloom-team"
+        "node_id": "5648226623174029337",
+        "name": "sql-analyst@brianhuang08"
       },
       "hub": null,
       "scores": {
         "sql": {
-          "attempts": 4,
-          "correct": 4,
+          "attempts": 5,
+          "correct": 5,
           "recent": [
+            1,
             1,
             1,
             1,
             1
           ]
         }
-      }
+      },
+      "activated_at": "2026-09-29T20:16:49Z"
     },
     {
       "slug": "stats-analyst",
@@ -126,15 +127,15 @@
         "builder",
         "reviewer"
       ],
-      "approved_by": "vverm",
+      "approved_by": "node-owner:brianhuang08",
       "node": {
         "mode": "node",
-        "node_id": "5201634893431535162",
-        "name": "stats-analyst",
-        "federation": "@vverm/bloom-team"
+        "node_id": "1859994103288427432",
+        "name": "stats-analyst@brianhuang08"
       },
       "hub": null,
-      "scores": {}
+      "scores": {},
+      "activated_at": "2026-09-29T20:16:51Z"
     },
     {
       "slug": "date-analyst",

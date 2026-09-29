@@ -177,8 +177,11 @@ def cmd_activate(args) -> None:
     from forge.activation import activate
 
     bus, registry, backend, forge, benchmark = build_stack(args)
+    from forge.activation import list_nodes
+
     out = activate(registry, args.slug, node_id=args.node_id, bus=bus,
-                   backend=None if args.no_warm or args.backend != "supergrid" else backend, timeout=args.timeout)
+                   backend=None if args.no_warm or args.backend != "supergrid" else backend, timeout=args.timeout,
+                   lister=lambda: list_nodes(args.federation))
     print(json.dumps({k: v for k, v in out.items() if k != "warm_up"}, indent=2))
     if out.get("warm_up"):
         print("warm-up:", out["warm_up"].get("answer"))

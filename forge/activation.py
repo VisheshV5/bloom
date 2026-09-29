@@ -21,14 +21,23 @@ from forge.paths import PROPOSALS, ROOT
 FLWR = ["uvx", "--from", "flwr==1.39.0", "flwr"]
 
 
-def list_nodes() -> list[dict]:
-    proc = subprocess.run([*FLWR, "supernode", "list", "supergrid", "--format", "json"], cwd=ROOT,
-                          capture_output=True, text=True, timeout=120)
+def list_nodes(federation: str | None = None) -> list[dict]:
+    """Nodes with status. `supernode list` only shows nodes YOU own; a federation lists every
+    member's nodes (e.g. the data owner's), so prefer it when we know the federation."""
+    if federation:
+        cmd = [*FLWR, "federation", "list", "supergrid", "--federation", federation, "--format", "json"]
+    else:
+        cmd = [*FLWR, "supernode", "list", "supergrid", "--format", "json"]
+    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=120)
     text = proc.stdout[proc.stdout.find("{"):] if "{" in proc.stdout else "{}"
     try:
-        return list(json.loads(text).get("nodes", []))
+        data = json.loads(text)
     except ValueError:
         return []
+    if federation:
+        return [{"node-id": n.get("node_id"), "owner-name": n.get("owner"), "status": n.get("status")}
+                for n in (data.get("federation") or {}).get("nodes", [])]
+    return list(data.get("nodes", []))
 
 
 def _node_id(n: dict) -> str:

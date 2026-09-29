@@ -23,9 +23,9 @@ PROMPT = (
 )
 
 PLAN = [
-    {"step_id": "s1", "specialist": "records-analyst@hospital-a", "depends_on": [],
+    {"step_id": "s1", "specialist": "hospital-sql-analyst@hospital-a", "depends_on": [],
      "instruction": "At Hospital A, count admissions and 30-day readmissions under the old and the new discharge protocol."},
-    {"step_id": "s2", "specialist": "records-analyst@hospital-b", "depends_on": [],
+    {"step_id": "s2", "specialist": "hospital-sql-analyst@hospital-b", "depends_on": [],
      "instruction": "At Hospital B, count admissions and 30-day readmissions under the old and the new discharge protocol."},
     {"step_id": "s3", "specialist": "stats-analyst", "depends_on": ["s1", "s2"],
      "instruction": "Pool both hospitals' counts: readmission rate old vs new, change in percentage points, "

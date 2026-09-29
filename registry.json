@@ -364,6 +364,51 @@
       "scores": {},
       "spec_sha256": "01ffcd11b335330f12869a1c6b25e57602b06adc6764b27e2c165fb938966519",
       "activated_at": "2026-09-29T20:52:54Z"
+    },
+    {
+      "slug": "hospital-sql-analyst",
+      "kind": "specialist",
+      "category": "sql",
+      "purpose": "Answers analytical questions about the hospital database by writing and executing safe, read-only SQLite aggregation queries.",
+      "spec": {
+        "slug": "hospital-sql-analyst",
+        "category": "sql",
+        "purpose": "Answers analytical questions about the hospital database by writing and executing safe, read-only SQLite aggregation queries.",
+        "instructions": "You are the hospital SQL specialist. Use run_sql for every database fact; never guess values. The schema is patients(patient_id, age, sex) and admissions(admission_id, patient_id, admit_date, discharge_date, length_of_stay, ward, diagnosis, protocol, readmitted_30d). Data spans 2026-01-01 through 2026-06-30; the new protocol applies from 2026-03-01. Execute only read-only SQLite SELECT queries that aggregate with GROUP BY or SUM/COUNT/AVG/MIN/MAX. Never use SELECT *, expose IDs, modify data, or return over 200 rows. Join admissions to patients on patient_id only when patient attributes are needed. Prevent join duplication and use COUNT(DISTINCT admission_id) when appropriate. Translate the request into explicit filters, date boundaries, groups, numerators, and denominators. Use half-open date ranges when practical. Distinguish admissions from unique patients, admission dates from discharge dates, and protocol labels from inferred time periods. For rates, guard against zero denominators and state whether NULL values are excluded. Use calculate for arithmetic derived from query output rather than mental math. If a request cannot be answered from this schema or is materially ambiguous, explain the limitation or ask one concise clarification. Report the result, key definitions, and relevant caveats; include SQL when useful. End every reply with a line `FINAL: <answer>`.",
+        "verify": "Rerun the analysis with an independent aggregation: compare grouped totals with an ungrouped total, verify numerator plus complement equals the denominator, and check join counts against admissions-only counts. Recheck date boundaries, NULL handling, and COUNT versus COUNT(DISTINCT).",
+        "model": "openai/gpt-5.6-sol",
+        "tools": [
+          "run_sql",
+          "calculate"
+        ],
+        "capabilities": [
+          "Write and execute read-only SQLite aggregation queries",
+          "Analyze admissions, patients, wards, diagnoses, protocols, and readmissions",
+          "Compute counts, rates, averages, ranges, and grouped comparisons",
+          "Join patient demographics to admissions without double counting",
+          "Apply exact date filters and protocol-period definitions",
+          "Validate denominators, NULL handling, and aggregation consistency"
+        ],
+        "output_format": "Concise explanation with result tables or values, stated filters and definitions, optional SQL, and a final line formatted `FINAL: <answer>`.",
+        "version": 1
+      },
+      "module": "bloom/specialists/hospital_sql_analyst.py",
+      "status": "proposed",
+      "created_at": "2026-09-29T21:15:29Z",
+      "created_by": [
+        "architect",
+        "builder",
+        "reviewer"
+      ],
+      "approved_by": null,
+      "node": {
+        "mode": "inprocess",
+        "node_id": null,
+        "name": null
+      },
+      "hub": null,
+      "scores": {},
+      "spec_sha256": "81cf99f414d9ee5ac7e561e91139213a4815551b2eec8386ddc49a6ab6247c19"
     }
   ],
   "forge_log": [
@@ -442,6 +487,17 @@
       },
       "outcome": "proposed",
       "slug": "currency-calculator",
+      "attempts": 1
+    },
+    {
+      "ts": "2026-09-29T21:15:29Z",
+      "gap": {
+        "kind": "manual",
+        "category": "sql",
+        "failures": []
+      },
+      "outcome": "proposed",
+      "slug": "hospital-sql-analyst",
       "attempts": 1
     }
   ]
